@@ -61,7 +61,7 @@ USE_GRAPH_RUNTIME_DEBUG = 0
 # Requires LLVM version >= 4.0
 # Set LLVM_CONFIG to your version, uncomment to build with llvm support
 #
-# LLVM_CONFIG = llvm-config
+LLVM_CONFIG = llvm-config
 
 #---------------------------------------------
 # Contrib optional libraries.

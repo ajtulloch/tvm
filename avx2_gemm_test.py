@@ -15,8 +15,8 @@ def test_matmul_add():
     n = SIZE
     l = n
     m = n
-    A = tvm.placeholder((n, l), name='A', dtype='float32')
-    B = tvm.placeholder((m, l), name='B', dtype='float32')
+    A = tvm.placeholder((n, l), name='A')
+    B = tvm.placeholder((m, l), name='B')
     C = cblas.matmul(A, B, transb=True)
     D = tvm.compute(C.shape, lambda i, j: C[i,j], name="D")
     s = tvm.create_schedule(D.op)

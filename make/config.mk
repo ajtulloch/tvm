@@ -67,7 +67,7 @@ LLVM_CONFIG = llvm-config
 # Contrib optional libraries.
 #---------------------------------------------
 # Whether use BLAS, choices: openblas, atlas, blas, apple
-USE_BLAS = none
+USE_BLAS = apple
 
 # Whether use contrib.random in runtime
 USE_RANDOM = 0

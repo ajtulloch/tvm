@@ -74,15 +74,19 @@ def intrin_gemm(M, N, K_8):
         irb = tvm.ir_builder.create()
         print(K_8)
         ABregisters = [[tvm.const(0, 'float32x8') for n in range(N)] for m in range(M)]
+
         for k_8 in range(K_8):
             Aregisters = [Ab.vload([k_8, m, 0], 'float32x8') for m in range(M)]
             Bregisters = [Bb.vload([k_8, n, 0], 'float32x8') for n in range(N)]
-            ABregisters = [[ABregisters[m][n] + Aregisters[m] * Bregisters[n] for n in range(N)] for m in range(M)]
+            for m in range(M):
+                for n in range(N):
+                    ABregisters[m][n] = ABregisters[m][n] + Aregisters[m] * Bregisters[n]
 
         for m in range(M):
             for n in range(N):
                 irb.emit(cc.vstore([m, n, 0], ABregisters[m][n]))
         result = irb.get()
+        print("IR result: ")
         print(result)
         return result
 
@@ -216,13 +220,80 @@ def test_gemm_tensor():
         c = tvm.nd.array(np.zeros((n, m), dtype=C.dtype), ctx)
         ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
         tcost = ftimer(a, b, c).mean
-        print("TVM Tensor %s: exec=%g GFLOPS" % (ctx, 2 * n * m * ll / tcost / 10 ** 9))
+        print("TVM Tensorize %s: exec=%g GFLOPS" % (ctx, 2 * n * m * ll / tcost / 10 ** 9))
+        np.testing.assert_allclose(
+            c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-5)
+    check_device(target)
+
+def test_gemm_tensor_no_tensorize():
+    # graph
+    nn = SIZE
+    # n = tvm.var('n')
+    n = tvm.convert(nn)
+    m = n
+    ll = n
+    A = tvm.placeholder((n, ll), name='A', dtype='float32')
+    B = tvm.placeholder((m, ll), name='B', dtype='float32')
+
+    Apacked = tvm.compute(
+        (ll / 8, m, 8), lambda k_8, m, i: A[m, k_8 * 8 + i], name='Apacked')
+    Bpacked = tvm.compute(
+        (ll / 8, n, 8), lambda k_8, n, i: B[n, k_8 * 8 + i], name='Bpacked')
+    k_8 = tvm.reduce_axis(
+        (0, ll / 8), name='k_8')
+    Cpacked = tvm.compute(
+        (m, n, 8),
+        lambda x, y, i: tvm.sum(Apacked[k_8, x, i] * Bpacked[k_8, y, i], axis=k_8),
+        name='Cpacked')
+    k_inner_8 = tvm.reduce_axis((0, 8), name='k_inner_8')
+    C = tvm.compute((m, n), lambda x, y: tvm.sum(Cpacked[x, y, k_inner_8], axis=k_inner_8), name="C")
+    s = tvm.create_schedule(C.op)
+
+
+    xo, yo, xi, yi = s[Cpacked].tile(Cpacked.op.axis[0], Cpacked.op.axis[1], 4, 4)
+    # k_8, = s[Cpacked].op.reduce_axis
+    # ko, ki = s[C].split(k, factor=8)
+
+    s[Apacked].compute_at(s[Cpacked], xo)
+    s[Apacked].vectorize(Apacked.op.axis[2])
+    s[Bpacked].compute_at(s[Cpacked], yo)
+    s[Bpacked].vectorize(Bpacked.op.axis[2])
+    # # print(xi, xo, yi, yo, ki, ko)
+    s[Cpacked].reorder(xo, yo, xi, yi)
+    # # s[C].prefetch(A, ki, tvm.convert(1))
+    # s[Cpacked].compute_at(s[C], xo)
+    # lowering test
+    s = s.normalize()
+
+
+    # one line to build the function.
+    def check_device(device):
+        ctx = tvm.context(device, 0)
+        with tvm.target.create(device):
+            print(tvm.lower(s, [A, B, C], simple_mode=True))
+            f = tvm.build(s, [A, B, C])
+            f.save(os.path.join(os.getcwd(), 'gemm_notensor.asm'))
+            f.save(os.path.join(os.getcwd(), 'gemm_notensor.ll'))
+
+        # launch the kernel.
+        n = nn
+        m = n
+        ll = n
+        a_np = np.random.uniform(size=(n, ll)).astype(A.dtype)
+        b_np = np.random.uniform(size=(m, ll)).astype(B.dtype)
+        a = tvm.nd.array(a_np, ctx)
+        b = tvm.nd.array(b_np, ctx)
+        c = tvm.nd.array(np.zeros((n, m), dtype=C.dtype), ctx)
+        ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
+        tcost = ftimer(a, b, c).mean
+        print("TVM Tensor No Tensorize %s: exec=%g GFLOPS" % (ctx, 2 * n * m * ll / tcost / 10 ** 9))
         np.testing.assert_allclose(
             c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-5)
     check_device(target)
 
 if __name__ == "__main__":
     test_gemm_tensor()
+    test_gemm_tensor_no_tensorize()
     test_gemm()
 
 

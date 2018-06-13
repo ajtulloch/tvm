@@ -160,7 +160,7 @@ def test_gemm_tensor():
     # graph
     nn = SIZE
     # n = tvm.var('n')
-    n = tvm.convert(nn)
+    n = nn # tvm.convert(nn)
     m = n
     ll = n
     A = tvm.placeholder((n, ll), name='A', dtype='float32')
@@ -181,21 +181,30 @@ def test_gemm_tensor():
     s = tvm.create_schedule(C.op)
 
 
-    xo, yo, xi, yi = s[Cpacked].tile(Cpacked.op.axis[0], Cpacked.op.axis[1], 4, 4)
+    xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], 4, 2)
     # k_8, = s[Cpacked].op.reduce_axis
     # ko, ki = s[C].split(k, factor=8)
 
-    s[Apacked].compute_at(s[Cpacked], xo)
-    s[Apacked].vectorize(Apacked.op.axis[2])
-    s[Bpacked].compute_at(s[Cpacked], yo)
-    s[Bpacked].vectorize(Bpacked.op.axis[2])
+    # s[Apacked].compute_at(s[C], xo)
+    # s[Apacked].vectorize(Apacked.op.axis[2])
+    # s[Bpacked].compute_at(s[C], yo)
+    # s[Bpacked].vectorize(Bpacked.op.axis[2])
     # # print(xi, xo, yi, yo, ki, ko)
-    s[Cpacked].reorder(xo, yo, xi, yi)
+    s[C].reorder(xo, yo, xi, yi)
+    s[C].vectorize(yi)
+    s[Apacked].compute_at(s[C], xo)
+    s[Bpacked].compute_at(s[C], yo)
+    s[Apacked].vectorize(Apacked.op.axis[2])
+    s[Bpacked].vectorize(Bpacked.op.axis[2])
+    s[Bpacked].unroll(Bpacked.op.axis[1])
+    s[Apacked].unroll(Apacked.op.axis[1])
     # # s[C].prefetch(A, ki, tvm.convert(1))
-
-    gemm_intrinsic_function = intrin_gemm(M=4, N=4, K_8=SIZE / 8)
-    s[Cpacked].tensorize(xi, gemm_intrinsic_function)
+    s[Cpacked].compute_at(s[C], yo)
+    gemm_intrinsic_function = intrin_gemm(M=4, N=2, K_8=SIZE / 8)
     # s[Cpacked].compute_at(s[C], xo)
+    xo, yo, xi, yi = s[Cpacked].tile(Cpacked.op.axis[0], Cpacked.op.axis[1], 4, 2)
+    s[Cpacked].tensorize(yo, gemm_intrinsic_function)
+
     # lowering test
     s = s.normalize()
 
@@ -293,8 +302,6 @@ def test_gemm_tensor_no_tensorize():
 
 if __name__ == "__main__":
     test_gemm_tensor()
-    test_gemm_tensor_no_tensorize()
-    test_gemm()
-
-
-    test_matmul_add()
+    # test_gemm_tensor_no_tensorize()
+    # test_gemm()
+    # test_matmul_add()

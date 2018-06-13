@@ -71,30 +71,21 @@ def intrin_gemm(M, N, K_8):
         cc = outs[0]
         args_1 = tvm.const(1, 'uint32')
 
-        COMPUTE, RESET, UPDATE = range(3)
-        def instr(index):
-            irb = tvm.ir_builder.create()
-            if index == RESET:
-                for m in range(M):
-                    for n in range(N):
-                        irb.emit(cc.vstore([m, n, 0], tvm.const(0, 'float32x8')))
-            else:
-                print(K_8)
-                assert K_8 == 1
-                Aregisters = [Ab.vload([0, m, 0], 'float32x8') for m in range(M)]
-                print(Aregisters[0])
-                Bregisters = [Bb.vload([0, n, 0], 'float32x8') for n in range(N)]
-                ABregisters = [[Aregisters[m] * Bregisters[n] for n in range(N)] for m in range(M)]
-                print(ABregisters[0][0])
-                print(type(ABregisters[0][0]))
-                for m in range(M):
-                    for n in range(N):
-                        irb.emit(cc.vstore([m, n, 0], ABregisters[m][n]))
-            result = irb.get()
-            print(result)
-            return result
-        # body, reset, update
-        return instr(COMPUTE), instr(RESET), instr(UPDATE)
+        irb = tvm.ir_builder.create()
+        print(K_8)
+        ABregisters = [[tvm.const(0, 'float32x8') for n in range(N)] for m in range(M)]
+        for k_8 in range(K_8):
+            Aregisters = [Ab.vload([k_8, m, 0], 'float32x8') for m in range(M)]
+            Bregisters = [Bb.vload([k_8, n, 0], 'float32x8') for n in range(N)]
+            ABregisters = [[ABregisters[m][n] + Aregisters[m] * Bregisters[n] for n in range(N)] for m in range(M)]
+
+        for m in range(M):
+            for n in range(N):
+                irb.emit(cc.vstore([m, n, 0], ABregisters[m][n]))
+        result = irb.get()
+        print(result)
+        return result
+
     with tvm.build_config(offset_factor=1, partition_const_loop=True):
         return tvm.decl_tensor_intrin(C.op, intrin_func, binds={A: Ab, B: Bb, C: Cb})
 
@@ -167,7 +158,7 @@ def test_gemm_tensor():
     # n = tvm.var('n')
     n = tvm.convert(nn)
     m = n
-    ll = 8
+    ll = n
     A = tvm.placeholder((n, ll), name='A', dtype='float32')
     B = tvm.placeholder((m, ll), name='B', dtype='float32')
 
@@ -198,7 +189,7 @@ def test_gemm_tensor():
     s[Cpacked].reorder(xo, yo, xi, yi)
     # # s[C].prefetch(A, ki, tvm.convert(1))
 
-    gemm_intrinsic_function = intrin_gemm(M=4, N=4, K_8=1)
+    gemm_intrinsic_function = intrin_gemm(M=4, N=4, K_8=SIZE / 8)
     s[Cpacked].tensorize(xi, gemm_intrinsic_function)
     # s[Cpacked].compute_at(s[C], xo)
     # lowering test
@@ -217,7 +208,7 @@ def test_gemm_tensor():
         # launch the kernel.
         n = nn
         m = n
-        ll = 8
+        ll = n
         a_np = np.random.uniform(size=(n, ll)).astype(A.dtype)
         b_np = np.random.uniform(size=(m, ll)).astype(B.dtype)
         a = tvm.nd.array(a_np, ctx)

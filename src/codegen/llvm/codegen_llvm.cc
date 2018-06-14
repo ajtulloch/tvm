@@ -530,6 +530,8 @@ llvm::Value* CodeGenLLVM::GetVarValue(const Variable* v) const {
 }
 
 llvm::Value* CodeGenLLVM::CreateCallExtern(const Call* op) {
+  std::cerr << "Created TVM function: " << op->name << std::endl;
+  LOG(FATAL) << "TVM function: " << op->name;
   std::vector<llvm::Value*> arg_value;
   std::vector<llvm::Type*> arg_type;
   for (size_t i = 0; i < op->args.size(); ++i) {

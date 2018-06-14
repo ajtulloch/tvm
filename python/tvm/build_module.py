@@ -490,9 +490,14 @@ def build(sch,
     fdevice = [ir_pass.LowerIntrin(x, target_device.target_name) for x in fdevice]
     fhost = [ir_pass.LowerIntrin(x, target_host.target_name) for x in fhost]
     fhost = [ir_pass.CombineContextCall(x) for x in fhost]
+    print("Lowering fhost", fhost)
     mhost = codegen.build_module(fhost, str(target_host))
-
+    print("Lowering mhost", mhost)
+    print("fdevice", fdevice)
     if fdevice:
         mdev = codegen.build_module(fdevice, str(target_device))
+        print("mdev", mdev)
         mhost.import_module(mdev)
+        print("imported module")
     return mhost
+

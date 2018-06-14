@@ -121,6 +121,37 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     std::unique_ptr<CodeGenLLVM> cg = CodeGenLLVM::Create(tm_);
     entry_func_ = funcs[0]->name;
     cg->Init(funcs[0]->name, tm_, ctx_.get(), system_lib, system_lib);
+
+    Array<Expr> bitcode_files;
+    if (const auto *llvm_bitcode_paths =
+            tvm::runtime::Registry::Get("tvm_callback_llvm_bitcode_path")) {
+      bitcode_files = (*llvm_bitcode_paths)();
+      std::cerr << "tvm bitcode paths found!" << std::endl;
+    } else {
+      std::cerr << "No tvm bitcode paths found" << std::endl;
+    }
+    for (auto &bitcode : bitcode_files) {
+      std::cerr << "Loading path: "<< bitcode;
+      std::string path = bitcode.as<StringImm>()->value;
+      llvm::SMDiagnostic err;
+      std::unique_ptr<llvm::Module> mlib = llvm::parseIRFile(path, err, *ctx_);
+      if (mlib.get() == nullptr) {
+        std::string msg = err.getMessage();
+        LOG(FATAL) << "Fail to load bitcode file " << path << "\n"
+                   << "line " << err.getLineNo() << ":" << msg;
+      }
+      std::cerr << "Got triple" << std::endl;
+      mlib->setTargetTriple(tm_->getTargetTriple().str());
+      mlib->setDataLayout(tm_->createDataLayout());
+      std::cerr << "Got dat alayout" << std::endl;
+      for (llvm::Function &f : mlib->functions()) {
+        std::cerr << "Found function: " << std::string(f.getName());
+        f.addFnAttr(llvm::Attribute::AlwaysInline);
+      }
+      std::cerr << "Got here" << std::endl;
+      cg->AddLinkModule(std::move(mlib));
+    }
+
     for (LoweredFunc f :  funcs) {
       cg->AddFunction(f);
     }
@@ -240,12 +271,17 @@ class LLVMModuleNode final : public runtime::ModuleNode {
   std::shared_ptr<llvm::LLVMContext> ctx_;
 };
 
+runtime::Module BuildLLVM(Array<LoweredFunc> funcs, std::string target) {
+  std::shared_ptr<LLVMModuleNode> n = std::make_shared<LLVMModuleNode>();
+  n->Init(funcs, target);
+  Array<Expr> bitcode_files;
+  return runtime::Module(n);
+}
+
 TVM_REGISTER_API("codegen.build_llvm")
-.set_body([](TVMArgs args, TVMRetValue* rv) {
-    std::shared_ptr<LLVMModuleNode> n = std::make_shared<LLVMModuleNode>();
-    n->Init(args[0], args[1]);
-    *rv = runtime::Module(n);
-  });
+    .set_body([](TVMArgs args, TVMRetValue *rv) {
+      *rv = BuildLLVM(args[0], args[1]);
+    });
 
 TVM_REGISTER_API("module.loadfile_ll")
 .set_body([](TVMArgs args, TVMRetValue* rv) {

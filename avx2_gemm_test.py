@@ -3,7 +3,7 @@ import numpy as np
 from tvm.contrib import cblas
 import os
 os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
-REPEATS = 10
+REPEATS = 1000
 RTOL = 1.0e-5
 AVX2_WIDTH = 256
 target = 'llvm -mcpu=core-avx2 -mattr=+popcnt'
@@ -19,16 +19,41 @@ def bitcode_paths():
     global BITCODE_PATHS
     return BITCODE_PATHS
 
-
-def test_matmul_add():
+def test_matmul_gemm():
     n = SIZE
     l = n
     m = n
-    A = tvm.placeholder((n, l), name='A')
-    B = tvm.placeholder((m, l), name='B')
-    C = cblas.matmul(A, B, transb=True)
-    D = tvm.compute(C.shape, lambda i, j: C[i,j], name="D")
-    s = tvm.create_schedule(D.op)
+    A = tvm.placeholder((n, l), name='A', dtype='float32')
+    B = tvm.placeholder((m, l), name='B', dtype='float32')
+    bn = 32
+    k = tvm.reduce_axis((0, l), 'k')
+    packedB = tvm.compute((n / bn, l, bn), lambda x, y, z: B[x * bn + z, y], name='packedB')
+
+    C = tvm.compute((m, n),
+                    lambda x, y: tvm.sum(A[x, k] * packedB[y / bn, k, y % bn], axis=k),
+                    name = 'C')
+    s = tvm.create_schedule(C.op)
+
+    # Allocate write cache
+    CC = s.cache_write(C, 'global')
+
+    xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+
+    # Write cache is computed at yo
+    s[CC].compute_at(s[C], yo)
+
+    # New inner axes
+    xc, yc = s[CC].op.axis
+
+    k, = s[CC].op.reduce_axis
+    ko, ki = s[CC].split(k, factor=8)
+    s[CC].reorder(ko, xc, ki, yc)
+    s[CC].unroll(ki)
+    s[CC].vectorize(yc)
+
+    x, y, z = s[packedB].op.axis
+    s[packedB].vectorize(y)
+
 
     def verify(target="llvm"):
         if not tvm.module.enabled(target):
@@ -38,17 +63,47 @@ def test_matmul_add():
             print("skip because extern function is not avalable")
             return
         ctx = tvm.cpu(0)
-        print(tvm.lower(s, [A, B, D], simple_mode=True))
-        f = tvm.build(s, [A, B, D], target)
+        print(tvm.lower(s, [A, B, C], simple_mode=True))
+        f = tvm.build(s, [A, B, C], target)
         a = tvm.nd.array(np.random.uniform(size=(n, l)).astype(A.dtype), ctx)
         b = tvm.nd.array(np.random.uniform(size=(m, l)).astype(B.dtype), ctx)
-        d = tvm.nd.array(np.zeros((n, m), dtype=D.dtype), ctx)
-        f(a, b, d)
+        c = tvm.nd.array(np.zeros((n, m), dtype=C.dtype), ctx)
+        f(a, b, c)
         ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
-        tcost = ftimer(a, b, d).mean
+        tcost = ftimer(a, b, c).mean
         print("MATMUL %s: exec=%g GFLOPS" % (ctx, 2 * n * m * l / tcost / 10 ** 9))
         np.testing.assert_allclose(
-            d.asnumpy(), np.dot(a.asnumpy(), b.asnumpy().T), rtol=1e-5)
+            c.asnumpy(), np.dot(a.asnumpy(), b.asnumpy().T), rtol=1e-5)
+    verify()
+
+def test_matmul_add():
+    n = SIZE
+    l = n
+    m = n
+    A = tvm.placeholder((n, l), name='A', dtype='float32')
+    B = tvm.placeholder((m, l), name='B', dtype='float32')
+    C = cblas.matmul(A, B, transb=True)
+    s = tvm.create_schedule(C.op)
+
+    def verify(target="llvm"):
+        if not tvm.module.enabled(target):
+            print("skip because %s is not enabled..." % target)
+            return
+        if not tvm.get_global_func("tvm.contrib.cblas.matmul", True):
+            print("skip because extern function is not avalable")
+            return
+        ctx = tvm.cpu(0)
+        print(tvm.lower(s, [A, B, C], simple_mode=True))
+        f = tvm.build(s, [A, B, C], target)
+        a = tvm.nd.array(np.random.uniform(size=(n, l)).astype(A.dtype), ctx)
+        b = tvm.nd.array(np.random.uniform(size=(m, l)).astype(B.dtype), ctx)
+        c = tvm.nd.array(np.zeros((n, m), dtype=C.dtype), ctx)
+        f(a, b, c)
+        ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
+        tcost = ftimer(a, b, c).mean
+        print("MATMUL %s: exec=%g GFLOPS" % (ctx, 2 * n * m * l / tcost / 10 ** 9))
+        np.testing.assert_allclose(
+            c.asnumpy(), np.dot(a.asnumpy(), b.asnumpy().T), rtol=1e-5)
     verify()
 
 
@@ -434,71 +489,107 @@ def test_gemm_tensor_tensorize_extern():
             c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-5)
     check_device(target)
 
+
+def intrin_vadd_16():
+    x = tvm.placeholder((16,), name='vx')
+    y = tvm.placeholder((16,), name='vy')
+    z = tvm.compute(x.shape, lambda i: x[i] + y[i], name='z')
+    def intrin_func(ins, outs):
+        xx, yy = ins
+        zz = outs[0]
+        irb = tvm.ir_builder.create()
+        extern_call = tvm.call_extern(
+            "int32",
+            "vadd_16_avx2",
+            irb.buffer_ptr(xx),
+            xx.elem_offset,
+            irb.buffer_ptr(yy),
+            yy.elem_offset,
+            irb.buffer_ptr(zz),
+            zz.elem_offset)
+        irb.emit(extern_call)
+        return irb.get()
+        return irbb
+
+    with tvm.build_config(offset_factor=16):
+        return tvm.decl_tensor_intrin(z.op, intrin_func)
+
 def test_tensorize_vadd():
-    m = 128
+    m = 2048
     x = tvm.placeholder((m,), name='x')
     y = tvm.placeholder((m,), name='y')
     z = tvm.compute(x.shape, lambda i: x[i] + y[i], name='z')
 
-    def intrin_vadd(n):
-        x = tvm.placeholder((n,), name='vx')
-        y = tvm.placeholder((n,), name='vy')
-        z = tvm.compute(x.shape, lambda i: x[i] + y[i], name='z')
-        def intrin_func(ins, outs):
-            xx, yy = ins
-            zz = outs[0]
-            irb = tvm.ir_builder.create()
-            print(xx.shape[0])
-            print(type(xx.shape[0]))
-            print(type(xx.shape))
-            extern_call = tvm.call_extern(
-                "int32",
-                "vadd__avx2",
-                n,
-                irb.buffer_ptr(xx),
-                xx.elem_offset,
-                irb.buffer_ptr(yy),
-                yy.elem_offset,
-                irb.buffer_ptr(zz),
-                zz.elem_offset)
-            irb.emit(extern_call)
-            irbb = irb.get()
-            # return tvm.call_packed("vadd", xx, yy, zz)
-            print(irbb)
-            return irbb
-
-        with tvm.build_config(offset_factor=16):
-            return tvm.decl_tensor_intrin(z.op, intrin_func)
-
-    def check(factor):
+    def check():
         s = tvm.create_schedule(z.op)
-        xo, xi = s[z].split(z.op.axis[0], factor=factor)
-        vadd = intrin_vadd(factor)
+        xo, xi = s[z].split(z.op.axis[0], factor=16)
+        vadd = intrin_vadd_16()
         s[z].tensorize(xi, vadd)
         s = s.normalize()
         dom_map = tvm.schedule.InferBound(s)
         finfer = tvm.get_global_func("test.op.InferTensorizeRegion")
         out_dom, in_dom = finfer(s[z], dom_map)
-        assert tvm.ir_pass.Equal(out_dom[z.op.axis[0]].extent, factor)
-        assert tvm.ir_pass.Equal(out_dom[z.op.axis[0]].min, xo * factor)
-        assert tvm.ir_pass.Equal(in_dom.items()[0][1][0].extent, factor)
+        assert tvm.ir_pass.Equal(out_dom[z.op.axis[0]].extent, 16)
+        assert tvm.ir_pass.Equal(out_dom[z.op.axis[0]].min, xo * 16)
+        assert tvm.ir_pass.Equal(in_dom.items()[0][1][0].extent, 16)
         fmatch = tvm.get_global_func("test.op.MatchTensorizeBody")
         body = fmatch(s[z], out_dom, in_dom, vadd)
         assert tvm.ir_pass.Equal(tvm.ir_pass.CanonicalSimplify(body[0]),
                                  tvm.ir_pass.CanonicalSimplify(vadd.op.body[0]))
         stmt = tvm.schedule.ScheduleOps(s, dom_map)
         print(tvm.lower(s, [x, y, z], simple_mode=True))
-        f = tvm.build(s, [x, y, z], "llvm")
+        f = tvm.build(s, [x, y, z], target)
+        f.save("fadd.o")
+        f.save("fadd.ll")
+        f.save("fadd.asm")
         xx = tvm.nd.array(np.random.uniform(size=(m,)).astype('float32'), ctx)
         yy = tvm.nd.array(np.random.uniform(size=(m,)).astype('float32'), ctx)
         zz = tvm.nd.array(np.zeros((m,), dtype='float32'), ctx)
         f(xx, yy, zz)
+        ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
+        tcost = ftimer(xx, yy, zz).mean
+        print("TVM VADD %s: exec=%g GFLOPS" % (ctx, 2 * m / tcost / 10 ** 9))
+
         np.testing.assert_allclose(zz.asnumpy(), xx.asnumpy() + yy.asnumpy(), rtol=1e-5)
 
-    check(16)
+    check()
+
+def test_no_tensorize_vadd():
+    m = 2048
+    x = tvm.placeholder((m,), name='x')
+    y = tvm.placeholder((m,), name='y')
+    z = tvm.compute(x.shape, lambda i: x[i] + y[i], name='z')
+
+    def check():
+        s = tvm.create_schedule(z.op)
+        xo, xi = s[z].split(z.op.axis[0], factor=16)
+        s[z].vectorize(xi)
+        s = s.normalize()
+
+        print(tvm.lower(s, [x, y, z], simple_mode=True))
+        f = tvm.build(s, [x, y, z], target)
+        f.save("fadd_notensor.o")
+        f.save("fadd_notensor.ll")
+        f.save("fadd_notensor.asm")
+        xx = tvm.nd.array(np.random.uniform(size=(m,)).astype('float32'), ctx)
+        yy = tvm.nd.array(np.random.uniform(size=(m,)).astype('float32'), ctx)
+        zz = tvm.nd.array(np.zeros((m,), dtype='float32'), ctx)
+        f(xx, yy, zz)
+        ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
+        tcost = ftimer(xx, yy, zz).mean
+        print("TVM VADD %s: exec=%g GFLOPS" % (ctx, 2 * m / tcost / 10 ** 9))
+
+        np.testing.assert_allclose(zz.asnumpy(), xx.asnumpy() + yy.asnumpy(), rtol=1e-5)
+
+    check()
+
 
 if __name__ == "__main__":
-    test_tensorize_vadd()
+    test_matmul_add()
+    test_matmul_gemm()
+
+    # test_tensorize_vadd()
+    # test_no_tensorize_vadd()
     # test_gemm_tensor()
     # test_gemm_tensor_tensorize_extern()
     # test_gemm_tensor_no_tensorize()

@@ -221,7 +221,6 @@ void CodeGenLLVM::Optimize() {
   MPassManager mpass;
   builder.populateFunctionPassManager(fpass);
   builder.populateModulePassManager(mpass);
-
   fpass.doInitialization();
   for (auto it = module_->begin(); it != module_->end(); ++it) {
     fpass.run(*it);

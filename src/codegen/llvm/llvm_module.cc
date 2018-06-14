@@ -145,7 +145,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
       mlib->setDataLayout(tm_->createDataLayout());
       std::cerr << "Got dat alayout" << std::endl;
       for (llvm::Function &f : mlib->functions()) {
-        std::cerr << "Found function: " << std::string(f.getName());
+        std::cerr << "Found function: " << std::string(f.getName()) << std::endl;
         f.addFnAttr(llvm::Attribute::AlwaysInline);
       }
       std::cerr << "Got here" << std::endl;

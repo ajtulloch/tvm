@@ -325,31 +325,39 @@ def test_gemm_tensor_tensorize_extern():
 
         Ab = tvm.decl_buffer(A.shape, A.dtype,
                             name="A",
-                            offset_factor=8,
+                            offset_factor=1,
                             strides=[tvm.var('lda'), 8, 1])
         Bb = tvm.decl_buffer(B.shape, B.dtype,
                             name="B",
-                            offset_factor=8,
+                            offset_factor=1,
                             strides=[tvm.var('ldb'), 8, 1])
         Cb = tvm.decl_buffer(C.shape, C.dtype,
                             name="C",
-                            offset_factor=8,
+                            offset_factor=1,
                             strides=[tvm.var('ldc'), 1])
 
         def intrin_func(ins, outs):
             aa, bb = ins
             cc = outs[0]
             irb = tvm.ir_builder.create()
+            print(bb.shape)
+            print(bb.strides)
             extern_call = tvm.call_extern(
                 "int32",
                 "gemmMxN__avx2",
+                aa.shape[1],
+                bb.shape[1],
+                aa.shape[0],
                 irb.buffer_ptr(aa),
+                aa.strides[0],
                 irb.buffer_ptr(bb),
-                irb.buffer_ptr(cc))
+                bb.strides[0],
+                irb.buffer_ptr(cc),
+                cc.strides[0])
             irb.emit(extern_call)
             return irb.get()
 
-        with tvm.build_config(offset_factor=1, partition_const_loop=True):
+        with tvm.build_config(offset_factor=16, data_alignment=16):
             return tvm.decl_tensor_intrin(C.op, intrin_func, binds={A: Ab, B: Bb, C: Cb})
 
     # graph
@@ -388,9 +396,7 @@ def test_gemm_tensor_tensorize_extern():
     # # s[C].prefetch(A, ki, tvm.convert(1))
 
     # s[Cpacked].compute_at(s[C], xo)
-
-
-    s = s.normalize()
+    # s = s.normalize()
 
 
     # one line to build the function.
@@ -403,8 +409,9 @@ def test_gemm_tensor_tensorize_extern():
             print(tvm.lower(s, [A, B, C], simple_mode=False))
             print("Buildling the kernel")
             f = tvm.build(s, [A, B, C])
-            f.save(os.path.join(os.getcwd(), 'gemm_notensor.asm'))
-            f.save(os.path.join(os.getcwd(), 'gemm_notensor.ll'))
+            f.save(os.path.join(os.getcwd(), 'gemm_tensor_extern.asm'))
+            f.save(os.path.join(os.getcwd(), 'gemm_tensor_extern.ll'))
+            f.save(os.path.join(os.getcwd(), 'gemm_tensor_extern.o'))
         print("Build the kernel")
         # launch the kernel.
         n = nn
@@ -422,13 +429,78 @@ def test_gemm_tensor_tensorize_extern():
         print("ftimer worked")
         tcost = ftimer(a, b, c).mean
         print("TVM Tensor No Tensorize %s: exec=%g GFLOPS" % (ctx, 2 * n * m * ll / tcost / 10 ** 9))
+        print(c.asnumpy().sum())
         np.testing.assert_allclose(
             c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-5)
     check_device(target)
 
+def test_tensorize_vadd():
+    m = 128
+    x = tvm.placeholder((m,), name='x')
+    y = tvm.placeholder((m,), name='y')
+    z = tvm.compute(x.shape, lambda i: x[i] + y[i], name='z')
+
+    def intrin_vadd(n):
+        x = tvm.placeholder((n,), name='vx')
+        y = tvm.placeholder((n,), name='vy')
+        z = tvm.compute(x.shape, lambda i: x[i] + y[i], name='z')
+        def intrin_func(ins, outs):
+            xx, yy = ins
+            zz = outs[0]
+            irb = tvm.ir_builder.create()
+            print(xx.shape[0])
+            print(type(xx.shape[0]))
+            print(type(xx.shape))
+            extern_call = tvm.call_extern(
+                "int32",
+                "vadd__avx2",
+                n,
+                irb.buffer_ptr(xx),
+                xx.elem_offset,
+                irb.buffer_ptr(yy),
+                yy.elem_offset,
+                irb.buffer_ptr(zz),
+                zz.elem_offset)
+            irb.emit(extern_call)
+            irbb = irb.get()
+            # return tvm.call_packed("vadd", xx, yy, zz)
+            print(irbb)
+            return irbb
+
+        with tvm.build_config(offset_factor=16):
+            return tvm.decl_tensor_intrin(z.op, intrin_func)
+
+    def check(factor):
+        s = tvm.create_schedule(z.op)
+        xo, xi = s[z].split(z.op.axis[0], factor=factor)
+        vadd = intrin_vadd(factor)
+        s[z].tensorize(xi, vadd)
+        s = s.normalize()
+        dom_map = tvm.schedule.InferBound(s)
+        finfer = tvm.get_global_func("test.op.InferTensorizeRegion")
+        out_dom, in_dom = finfer(s[z], dom_map)
+        assert tvm.ir_pass.Equal(out_dom[z.op.axis[0]].extent, factor)
+        assert tvm.ir_pass.Equal(out_dom[z.op.axis[0]].min, xo * factor)
+        assert tvm.ir_pass.Equal(in_dom.items()[0][1][0].extent, factor)
+        fmatch = tvm.get_global_func("test.op.MatchTensorizeBody")
+        body = fmatch(s[z], out_dom, in_dom, vadd)
+        assert tvm.ir_pass.Equal(tvm.ir_pass.CanonicalSimplify(body[0]),
+                                 tvm.ir_pass.CanonicalSimplify(vadd.op.body[0]))
+        stmt = tvm.schedule.ScheduleOps(s, dom_map)
+        print(tvm.lower(s, [x, y, z], simple_mode=True))
+        f = tvm.build(s, [x, y, z], "llvm")
+        xx = tvm.nd.array(np.random.uniform(size=(m,)).astype('float32'), ctx)
+        yy = tvm.nd.array(np.random.uniform(size=(m,)).astype('float32'), ctx)
+        zz = tvm.nd.array(np.zeros((m,), dtype='float32'), ctx)
+        f(xx, yy, zz)
+        np.testing.assert_allclose(zz.asnumpy(), xx.asnumpy() + yy.asnumpy(), rtol=1e-5)
+
+    check(16)
+
 if __name__ == "__main__":
-    test_gemm_tensor()
-    test_gemm_tensor_tensorize_extern()
+    test_tensorize_vadd()
+    # test_gemm_tensor()
+    # test_gemm_tensor_tensorize_extern()
     # test_gemm_tensor_no_tensorize()
     # test_gemm()
     # test_matmul_add()

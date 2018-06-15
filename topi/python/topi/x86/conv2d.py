@@ -196,12 +196,12 @@ def schedule_conv2d(outs):
 
         n_pad, c_pad, h_pad, w_pad = data_pad.op.axis
         pad_fused = s[data_pad].fuse(n_pad, c_pad)
-        s[data_pad].parallel(pad_fused)
+        # s[data_pad].parallel(pad_fused)
         C = conv
         n, c, h, w = C.op.axis
         rc, ry, rx = C.op.reduce_axis
         fused = s[C].fuse(n, c)
-        s[C].parallel(fused)
+        # s[C].parallel(fused)
         wo, wi = s[C].split(w, factor=16)
         s[C].reorder(fused, rc, h, wo, ry, rx, wi)  # move rc to outer loop
         s[C].unroll(rx)
@@ -218,7 +218,7 @@ def schedule_conv2d(outs):
                 if len(op.axis) == 4 and 'avx' not in str(target): # schedule bias + bn + relu
                     n, c, h, w = op.axis
                     fused = s[op].fuse(n, c)
-                    s[op].parallel(fused)
+                    # s[op].parallel(fused)
                     s[op].vectorize(w)
             for tensor in op.input_tensors:
                 if tensor.op.input_tensors:
@@ -274,7 +274,7 @@ def schedule_conv2d_nhwc(outs):
                 if len(op.axis) == 4: # schedule bias + bn + relu
                     n, h, w, c = op.axis
                     fused = s[op].fuse(n, h, w)
-                    s[op].parallel(fused)
+                    # s[op].parallel(fused)
                     s[op].vectorize(c)
             for tensor in op.input_tensors:
                 if tensor.op.input_tensors:
@@ -294,7 +294,7 @@ def schedule_conv2d_nhwc(outs):
 
             n_pad, h_pad, w_pad, c_pad = data_pad.op.axis
             pad_fused = s[data_pad].fuse(n_pad, h_pad)
-            s[data_pad].parallel(pad_fused)
+            # s[data_pad].parallel(pad_fused)
             C = conv
             n, h, w, c = C.op.axis
             ry, rx, rc = C.op.reduce_axis
@@ -304,7 +304,7 @@ def schedule_conv2d_nhwc(outs):
                 s[C].compute_at(s[output_op], c_out)
             else:
                 fused = s[C].fuse(n, h, w)
-                s[C].parallel(fused)
+                # s[C].parallel(fused)
 
     traverse(output_op)
     return s

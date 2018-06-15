@@ -3,7 +3,7 @@ import numpy as np
 from tvm.contrib import cblas
 import os
 os.environ['VECLIB_MAXIMUM_THREADS'] = '1'
-REPEATS = 1000
+REPEATS = 100000
 RTOL = 1.0e-5
 AVX2_WIDTH = 256
 target = 'llvm -mcpu=core-avx2 -mattr=+popcnt'
@@ -80,9 +80,9 @@ def test_matmul_add():
     n = SIZE
     l = n
     m = n
-    A = tvm.placeholder((n, l), name='A', dtype='float32')
-    B = tvm.placeholder((m, l), name='B', dtype='float32')
-    C = cblas.matmul(A, B, transb=True)
+    A = tvm.placeholder((l, m), name='A', dtype='float32')
+    B = tvm.placeholder((n, l), name='B', dtype='float32')
+    C = cblas.matmul(B, A)
     s = tvm.create_schedule(C.op)
 
     def verify(target="llvm"):
@@ -104,6 +104,40 @@ def test_matmul_add():
         print("MATMUL %s: exec=%g GFLOPS" % (ctx, 2 * n * m * l / tcost / 10 ** 9))
         np.testing.assert_allclose(
             c.asnumpy(), np.dot(a.asnumpy(), b.asnumpy().T), rtol=1e-5)
+    verify()
+
+def test_matmul_3136_64_64():
+    n = 64
+    l = 64
+    m = 3136
+    A = tvm.placeholder((l, m), name='A', dtype='float32')
+    B = tvm.placeholder((n, l), name='B', dtype='float32')
+    C = cblas.matmul(B, A)
+    print(C.shape)
+    print(n, m)
+    print(tuple(C.shape))
+    print((n, m))
+    s = tvm.create_schedule(C.op)
+    print(2 * n * l * m)
+    def verify(target="llvm"):
+        if not tvm.module.enabled(target):
+            print("skip because %s is not enabled..." % target)
+            return
+        if not tvm.get_global_func("tvm.contrib.cblas.matmul", True):
+            print("skip because extern function is not avalable")
+            return
+        ctx = tvm.cpu(0)
+        print(tvm.lower(s, [A, B, C], simple_mode=True))
+        f = tvm.build(s, [A, B, C], target)
+        a = tvm.nd.array(np.random.uniform(size=(l, m)).astype(A.dtype), ctx)
+        b = tvm.nd.array(np.random.uniform(size=(n, l)).astype(B.dtype), ctx)
+        c = tvm.nd.array(np.zeros((n, m), dtype=C.dtype), ctx)
+        f(a, b, c)
+        ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
+        tcost = ftimer(a, b, c).mean
+        print("MATMUL %s: exec=%g GFLOPS" % (ctx, 2 * n * m * l / tcost / 10 ** 9))
+        np.testing.assert_allclose(
+            c.asnumpy(), np.dot(b.asnumpy(), a.asnumpy()), rtol=1e-5)
     verify()
 
 
@@ -584,12 +618,92 @@ def test_no_tensorize_vadd():
     check()
 
 
-if __name__ == "__main__":
-    test_matmul_add()
-    test_matmul_gemm()
+import os
+import numpy as np
+import tvm
+import topi
+import topi.x86.conv2d
+import topi.testing
+from tvm.contrib.pickle_memoize import memoize
+from topi.util import get_const_tuple
 
-    # test_tensorize_vadd()
-    # test_no_tensorize_vadd()
+def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
+    in_height = in_width = in_size
+
+    A = tvm.placeholder((batch, in_channel, in_height, in_width), name='A')
+    W = tvm.placeholder((num_filter, in_channel, kernel, kernel), name='W')
+
+    a_shape = get_const_tuple(A.shape)
+    w_shape = get_const_tuple(W.shape)
+    dtype = A.dtype
+
+    @memoize("topi.tests.test_topi_conv2d_nchw.verify_conv2d_nchw")
+    def get_ref_data():
+        a_np = np.random.uniform(size=a_shape).astype(dtype)
+        w_np = np.random.uniform(size=w_shape).astype(dtype)
+        dw_np = topi.testing.dilate_python(w_np, (1, 1, dilation, dilation))
+        b_np = topi.testing.conv2d_nchw_python(a_np, dw_np, stride, padding)
+        c_np = np.maximum(b_np, 0)
+        return a_np, w_np, b_np, c_np
+
+    a_np, w_np, b_np, c_np = get_ref_data()
+
+    def check_device(device):
+        ctx = tvm.context(device, 0)
+        if not ctx.exist:
+            print("Skip because %s is not enabled" % device)
+            return
+        print("Running on target: %s" % device)
+        with tvm.target.create(target):
+            dW = topi.nn.dilate(W, (1, 1, dilation, dilation))
+            B = topi.nn.conv2d(A, dW, stride, padding, layout='NCHW')
+            C = topi.nn.relu(B)
+            s1 = topi.generic.nn.schedule_conv2d_nchw([B])
+            s2 = topi.generic.nn.schedule_conv2d_nchw([C])
+        a = tvm.nd.array(a_np, ctx)
+        w = tvm.nd.array(w_np, ctx)
+        b = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
+        c = tvm.nd.array(np.zeros(get_const_tuple(C.shape), dtype=C.dtype), ctx)
+        with tvm.build_config():
+            print(tvm.lower(s1, [A, W, B], device, simple_mode=True))
+            func1 = tvm.build(s1, [A, W, B], device, name="conv2d_%d_%d_%d_%d_%d_%d_%d_%d" % (batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation))
+            func2 = tvm.build(s2, [A, W, C], device, name="relu_%d_%d_%d_%d_%d_%d_%d_%d" % (batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation))
+            func1(a, w, b)
+            func2(a, w, c)
+            ftimer = func1.time_evaluator(func1.entry_name, ctx, number=REPEATS)
+            tcost = ftimer(a, w, b).mean
+            print(batch * in_height * in_width)
+            print(num_filter)
+            print(in_channel)
+            print(2 * batch * in_height * in_width * num_filter * in_channel)
+            print("Conv1x1 %s: exec=%g GFLOPS" % (ctx, 2 * batch * in_height * in_width * num_filter * in_channel  / tcost / 10 ** 9))
+
+            np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
+            np.testing.assert_allclose(c.asnumpy(), c_np, rtol=1e-5)
+
+    for device in [target]:
+        check_device(device)
+
+
+def simple_matmul():
+    n = 4
+    m = 3
+    k = 8
+
+
+
+def test_conv2d_nchw():
+    # ResNet18 worklaods
+    verify_conv2d_nchw(1, 64, 56, 64, 1, 1, 0)
+if __name__ == "__main__":
+    # test_conv2d_nchw()
+    # test_matmul_3136_64_64()
+
+    # test_matmul_add()
+    # test_matmul_gemm()
+    
+    test_tensorize_vadd()
+    test_no_tensorize_vadd()
     # test_gemm_tensor()
     # test_gemm_tensor_tensorize_extern()
     # test_gemm_tensor_no_tensorize()

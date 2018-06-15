@@ -126,12 +126,8 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     if (const auto *llvm_bitcode_paths =
             tvm::runtime::Registry::Get("tvm_callback_llvm_bitcode_path")) {
       bitcode_files = (*llvm_bitcode_paths)();
-      std::cerr << "tvm bitcode paths found!" << std::endl;
-    } else {
-      std::cerr << "No tvm bitcode paths found" << std::endl;
-    }
+    } 
     for (auto &bitcode : bitcode_files) {
-      std::cerr << "Loading path: "<< bitcode;
       std::string path = bitcode.as<StringImm>()->value;
       llvm::SMDiagnostic err;
       std::unique_ptr<llvm::Module> mlib = llvm::parseIRFile(path, err, *ctx_);
@@ -140,15 +136,11 @@ class LLVMModuleNode final : public runtime::ModuleNode {
         LOG(FATAL) << "Fail to load bitcode file " << path << "\n"
                    << "line " << err.getLineNo() << ":" << msg;
       }
-      std::cerr << "Got triple" << std::endl;
       mlib->setTargetTriple(tm_->getTargetTriple().str());
       mlib->setDataLayout(tm_->createDataLayout());
-      std::cerr << "Got dat alayout" << std::endl;
       for (llvm::Function &f : mlib->functions()) {
-        std::cerr << "Found function: " << std::string(f.getName()) << std::endl;
         f.addFnAttr(llvm::Attribute::AlwaysInline);
       }
-      std::cerr << "Got here" << std::endl;
       cg->AddLinkModule(std::move(mlib));
     }
 

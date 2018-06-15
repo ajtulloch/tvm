@@ -61,7 +61,7 @@ print("asdf")
 a = tvm.nd.array(numpy.random.rand(M, K).astype(dtype), ctx)
 b = tvm.nd.array(numpy.random.rand(K, N).astype(dtype), ctx)
 
-REPEAT = 1
+REPEAT = 50
 np_runing_time = timeit.timeit(setup='import numpy\n'
                                      'M = ' + str(M) + '\n'
                                      'K = ' + str(K) + '\n'
@@ -506,7 +506,6 @@ s[APanel].unroll(z)
 xo, yo, xi, yi = s[D].tile(D.op.axis[0], D.op.axis[1], bn, NTile)
 s[D].reorder(xo, yo, xi, yi)
 xii, xiii = s[D].split(xi, factor=MTile)
-
 s[C].compute_at(s[D], xii)
 xii, xiii = s[C].split(C.op.axis[0], factor=MTile)
 s[C].tensorize(xiii, gemm_intrinsic_function)
@@ -533,7 +532,6 @@ print('OptTensorizeRELU: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 C = cblas.matmul(A, B)
 D = tvm.compute((M, N), lambda m, n: tvm.max(C[m, n], 0))
 s = tvm.create_schedule(D.op)
-print(tvm.lower(s, [A, B, D], simple_mode=True))
 func = tvm.build(s, [A, B, D], target=target, name="blasgemmrelu")
 assert func
 
@@ -543,3 +541,57 @@ numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
 evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
 print('OptBLASRELU: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
+
+APanel = tvm.compute(
+    (M / MTile, K, MTile), lambda mtile, k, m: A[m + mtile * MTile, k], name='APanel')
+BPanel = tvm.compute(
+    (N / NTile, K, NTile), lambda ntile, k, n: B[k, n + ntile * NTile], name='BPanel')
+k = tvm.reduce_axis((0, K), name='k')
+C = tvm.compute(
+    (M, N),
+    lambda m, n: tvm.sum(
+        APanel[m / MTile, k, m % MTile] * BPanel[n / NTile, k, n % NTile],
+        axis=[k]),
+    name='C')
+D = tvm.compute((M, N), lambda m, n: tvm.max(C[m, n], 0), name="D")
+
+s = tvm.create_schedule(D.op)
+DD = s.cache_write(D, 'global')
+x, y, z = BPanel.op.axis
+# s[BPanel].vectorize(z)
+x, y, z = APanel.op.axis
+s[APanel].unroll(z)
+
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, NTile)
+# s[C].reorder(xo, yo, xi, yi)
+# xii, xiii = s[C].split(xi, factor=MTile)
+# gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
+# s[C].tensorize(xiii, gemm_intrinsic_function)
+
+xo, yo, xi, yi = s[D].tile(D.op.axis[0], D.op.axis[1], bn, NTile)
+s[D].reorder(xo, yo, xi, yi)
+s[DD].compute_at(s[D], yo)
+s[DD].vectorize(s[DD].op.axis[1])
+xii, xiii = s[DD].split(s[DD].op.axis[0], factor=MTile)
+s[C].compute_at(s[DD], xii)
+xii, xiii = s[C].split(C.op.axis[0], factor=MTile)
+s[C].tensorize(xiii, gemm_intrinsic_function)
+
+
+(x, y) = C.op.axis
+print(x, y)
+# gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
+# s[C].tensorize(xiii, gemm_intrinsic_function)
+
+print(tvm.lower(s, [A, B, D], simple_mode=True))
+func = tvm.build(s, [A, B, D], target=target)
+assert func
+func.save("tensor_gemm.asm")
+func.save("tensor_gemm.o")
+c = tvm.nd.array(numpy.zeros((M, N), dtype=dtype), ctx)
+func(a, b, c)
+print("C shape", c.shape)
+numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+print('OptTensorizeCache: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))

@@ -126,7 +126,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     if (const auto *llvm_bitcode_paths =
             tvm::runtime::Registry::Get("tvm_callback_llvm_bitcode_path")) {
       bitcode_files = (*llvm_bitcode_paths)();
-    } 
+    }
     for (auto &bitcode : bitcode_files) {
       std::string path = bitcode.as<StringImm>()->value;
       llvm::SMDiagnostic err;
@@ -139,7 +139,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
       mlib->setTargetTriple(tm_->getTargetTriple().str());
       mlib->setDataLayout(tm_->createDataLayout());
       for (llvm::Function &f : mlib->functions()) {
-        f.addFnAttr(llvm::Attribute::AlwaysInline);
+        // f.addFnAttr(llvm::Attribute::AlwaysInline);
       }
       cg->AddLinkModule(std::move(mlib));
     }

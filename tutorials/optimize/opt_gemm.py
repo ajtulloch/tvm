@@ -44,24 +44,24 @@ import timeit
 # The size of the matrix
 # (M, K) x (K, N)
 # You are free to try out different shapes, sometimes TVM optimization outperforms numpy with MKL.
-M = 1024
-K = 1024
-N = 1024
-
+M = 768
+K = 768
+N = 768
+FLOPS = 2 * M * N * K
 # The default tensor type in tvm
 dtype = "float32"
 
 # using Intel AVX2(Advanced Vector Extensions) ISA for SIMD
 # To get the best performance, please change the following line
 # to llvm -mcpu=core-avx2, or specific type of CPU you use
-target = 'llvm'
+target = 'llvm -mcpu=core-avx2'
 ctx = tvm.context(target, 0)
-
+print("asdf")
 # Random generated tensor for testing
 a = tvm.nd.array(numpy.random.rand(M, K).astype(dtype), ctx)
 b = tvm.nd.array(numpy.random.rand(K, N).astype(dtype), ctx)
 
-np_repeat = 100
+REPEAT = 1
 np_runing_time = timeit.timeit(setup='import numpy\n'
                                      'M = ' + str(M) + '\n'
                                      'K = ' + str(K) + '\n'
@@ -70,8 +70,9 @@ np_runing_time = timeit.timeit(setup='import numpy\n'
                                      'a = numpy.random.rand(M, K).astype(dtype)\n'
                                      'b = numpy.random.rand(K, N).astype(dtype)\n',
                                stmt='answer = numpy.dot(a, b)',
-                               number=np_repeat)
-print("Numpy running time: %f" % (np_runing_time / np_repeat))
+                               number=REPEAT)
+
+print("Numpy running time: %f" % (FLOPS * REPEAT / np_runing_time / 1.0E9))
 
 answer = numpy.dot(a.asnumpy(), b.asnumpy())
 
@@ -93,8 +94,8 @@ c = tvm.nd.array(numpy.zeros((M, N), dtype=dtype), ctx)
 func(a, b, c)
 numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=1)
-print('Baseline: %f' % evaluator(a, b, c).mean)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=1)
+# print('Baseline flops: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # In TVM, we can always inspect lower level IR to debug or optimize our schedule.
@@ -130,8 +131,8 @@ numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
 # By simply tiling the loop 32x32, and hoisting ko, ki outside the blocking loops,
 # we can see big speedup compared with the baseline.
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt1: %f' % evaluator(a, b, c).mean)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+# print('Opt1: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # Here is the generated IR after blocking.
@@ -164,8 +165,8 @@ c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
 func(a, b, c)
 numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt2: %f' % evaluator(a, b, c).mean)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+# print('Opt2: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # Here is the generated IR after vectorization.
@@ -197,8 +198,8 @@ c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
 func(a, b, c)
 numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt3: %f' % evaluator(a, b, c).mean)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+# print('Opt3: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # Here is the generated IR after loop permutation.
@@ -243,7 +244,7 @@ s[C].vectorize(yi)
 
 x, y, z = s[packedB].op.axis
 s[packedB].vectorize(z)
-s[packedB].parallel(x)
+# s[packedB].parallel(x)
 
 func = tvm.build(s, [A, B, C], target=target, name='mmult')
 assert func
@@ -252,8 +253,8 @@ c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
 func(a, b, c)
 numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt4: %f' % evaluator(a, b, c).mean)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+# print('Opt4: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # Here is the generated IR after array packing.
@@ -289,7 +290,7 @@ s[CC].vectorize(yc)
 
 x, y, z = s[packedB].op.axis
 s[packedB].vectorize(z)
-s[packedB].parallel(x)
+# s[packedB].parallel(x)
 
 func = tvm.build(s, [A, B, C], target=target, name='mmult')
 assert func
@@ -298,8 +299,8 @@ c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
 func(a, b, c)
 numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt5: %f' % evaluator(a, b, c).mean)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+# print('Opt5: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # Here is the generated IR after blocking.
@@ -328,11 +329,11 @@ s[CC].unroll(ki)
 s[CC].vectorize(yc)
 
 # parallel
-s[C].parallel(xo)
+# s[C].parallel(xo)
 
 x, y, z = s[packedB].op.axis
 s[packedB].vectorize(z)
-s[packedB].parallel(x)
+# s[packedB].parallel(x)
 
 func = tvm.build(s, [A, B, C], target=target, name = 'mmult')
 assert func
@@ -341,9 +342,8 @@ c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
 func(a, b, c)
 numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=50)
-opt6_time = evaluator(a, b, c).mean
-print('Opt6: %f' % opt6_time)
+evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+print('Opt6: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
 
 ################################################################################################
 # Here is the generated IR after parallelization.
@@ -360,3 +360,186 @@ print(tvm.lower(s, [A, B, C], simple_mode=True))
 # Note that the outputs on the web page reflect the running times on a non-exclusive
 # Docker container, thereby they are *unreliable*. It is highly encouraged to run the
 # tutorial by yourself to observe the performance gain acheived by TVM.
+
+from tvm.contrib import cblas
+
+C = cblas.matmul(A, B)
+s = tvm.create_schedule(C.op)
+func = tvm.build(s, [A, B, C], target=target, name="blasgemm")
+assert func
+
+c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+func(a, b, c)
+numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+print('OptBLAS: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
+
+
+
+BITCODE_PATHS = [
+    "gemmMxN__avx2.bc"
+]
+
+@tvm.register_func("tvm_callback_llvm_bitcode_path")
+def bitcode_paths():
+    global BITCODE_PATHS
+    return BITCODE_PATHS
+
+# Tensorized
+def intrin_gemm(M, N, K):
+    assert M == 4
+    assert N == 24
+    dtype = 'float32'
+    A = tvm.placeholder((K, M), dtype=dtype, name='A')
+    B = tvm.placeholder((K, N), dtype=dtype, name='B')
+    k = tvm.reduce_axis((0, K), name='k')
+    C = tvm.compute((M, N), lambda m, n:
+                    tvm.sum(A[k, m] * B[k, n], axis=[k]), name='C')
+
+    Ab = tvm.decl_buffer(A.shape, A.dtype,
+                        name="A",
+                        offset_factor=4,
+                        strides=[M, 1])
+    Bb = tvm.decl_buffer(B.shape, B.dtype,
+                        name="B",
+                        offset_factor=24,
+                        strides=[N, 1])
+    Cb = tvm.decl_buffer(C.shape, C.dtype,
+                        name="C",
+                        offset_factor=1,
+                        strides=[tvm.var('ldc'), 1])
+
+    def intrin_func(ins, outs):
+        aa, bb = ins
+        cc = outs[0]
+        irb = tvm.ir_builder.create()
+        extern_call = tvm.call_extern(
+            "int32",
+            "sgemm_only_4x24__avx2",
+            K,
+            irb.buffer_ptr(aa),
+            aa.elem_offset,
+            irb.buffer_ptr(bb),
+            bb.elem_offset,
+            irb.buffer_ptr(cc),
+            cc.elem_offset,
+            cc.strides[0])
+        irb.emit(extern_call)
+        return irb.get()
+
+    with tvm.build_config():
+        return tvm.decl_tensor_intrin(C.op,
+                                      intrin_func,
+                                      binds={A: Ab, B: Bb, C: Cb})
+
+MTile = 4
+NTile = 24
+
+assert M % MTile == 0
+assert N % NTile == 0
+
+APanel = tvm.compute(
+    (M / MTile, K, MTile), lambda mtile, k, m: A[m + mtile * MTile, k], name='APanel')
+BPanel = tvm.compute(
+    (N / NTile, K, NTile), lambda ntile, k, n: B[k, n + ntile * NTile], name='BPanel')
+print("APanel, ", APanel.shape)
+print("BPanel, ", BPanel.shape)
+k = tvm.reduce_axis((0, K), name='k')
+C = tvm.compute(
+    (M, N),
+    lambda m, n: tvm.sum(
+        APanel[m / MTile, k, m % MTile] * BPanel[n / NTile, k, n % NTile],
+        axis=[k]),
+    name='C')
+
+print("C", C.shape, M, N)
+s = tvm.create_schedule(C.op)
+x, y, z = BPanel.op.axis
+# s[BPanel].vectorize(z)
+x, y, z = APanel.op.axis
+s[APanel].unroll(z)
+xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, NTile)
+s[C].reorder(xo, yo, xi, yi)
+xii, xiii = s[C].split(xi, factor=MTile)
+gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
+s[C].tensorize(xiii, gemm_intrinsic_function)
+
+print(tvm.lower(s, [A, B, C], simple_mode=True))
+func = tvm.build(s, [A, B, C], target=target)
+assert func
+func.save("tensor_gemm.asm")
+func.save("tensor_gemm.o")
+c = tvm.nd.array(numpy.zeros((M, N), dtype=dtype), ctx)
+func(a, b, c)
+print("C shape", c.shape)
+numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+print('OptTensorize: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
+
+APanel = tvm.compute(
+    (M / MTile, K, MTile), lambda mtile, k, m: A[m + mtile * MTile, k], name='APanel')
+BPanel = tvm.compute(
+    (N / NTile, K, NTile), lambda ntile, k, n: B[k, n + ntile * NTile], name='BPanel')
+k = tvm.reduce_axis((0, K), name='k')
+C = tvm.compute(
+    (M, N),
+    lambda m, n: tvm.sum(
+        APanel[m / MTile, k, m % MTile] * BPanel[n / NTile, k, n % NTile],
+        axis=[k]),
+    name='C')
+D = tvm.compute((M, N), lambda m, n: tvm.max(C[m, n], 0), name="D")
+
+s = tvm.create_schedule(D.op)
+x, y, z = BPanel.op.axis
+# s[BPanel].vectorize(z)
+x, y, z = APanel.op.axis
+s[APanel].unroll(z)
+
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, NTile)
+# s[C].reorder(xo, yo, xi, yi)
+# xii, xiii = s[C].split(xi, factor=MTile)
+# gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
+# s[C].tensorize(xiii, gemm_intrinsic_function)
+
+xo, yo, xi, yi = s[D].tile(D.op.axis[0], D.op.axis[1], bn, NTile)
+s[D].reorder(xo, yo, xi, yi)
+xii, xiii = s[D].split(xi, factor=MTile)
+
+s[C].compute_at(s[D], xii)
+xii, xiii = s[C].split(C.op.axis[0], factor=MTile)
+s[C].tensorize(xiii, gemm_intrinsic_function)
+
+
+(x, y) = C.op.axis
+print(x, y)
+# gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
+# s[C].tensorize(xiii, gemm_intrinsic_function)
+
+print(tvm.lower(s, [A, B, D], simple_mode=True))
+func = tvm.build(s, [A, B, D], target=target)
+assert func
+func.save("tensor_gemm.asm")
+func.save("tensor_gemm.o")
+c = tvm.nd.array(numpy.zeros((M, N), dtype=dtype), ctx)
+func(a, b, c)
+print("C shape", c.shape)
+numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+print('OptTensorizeRELU: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))
+
+C = cblas.matmul(A, B)
+D = tvm.compute((M, N), lambda m, n: tvm.max(C[m, n], 0))
+s = tvm.create_schedule(D.op)
+print(tvm.lower(s, [A, B, D], simple_mode=True))
+func = tvm.build(s, [A, B, D], target=target, name="blasgemmrelu")
+assert func
+
+c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+func(a, b, c)
+numpy.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)
+print('OptBLASRELU: %f' % (FLOPS / evaluator(a, b, c).mean / 1E9))

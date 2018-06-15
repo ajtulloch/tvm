@@ -13,9 +13,9 @@ BITCODE_PATHS = [
     "gemmMxN__avx2.bc"
 ]
 
-M = (1024 / 12 * 12)
-N = (1024 / 96 * 96)
-K = (128)
+M = 512 / 24 * 24
+N = 1024 / 24 * 24
+K = 128
 
 
 @tvm.register_func("tvm_callback_llvm_bitcode_path")
@@ -116,12 +116,6 @@ def test_gemm_tensor_tensorize_extern_asm():
     s[C].reorder(xo, yo, xi, yi)
     gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
     s[C].tensorize(xi, gemm_intrinsic_function)
-    # s[APanel].unroll(z)
-    # s[BPanel].vectorize(z)
-    # s[APanel].compute_at(s[C], yo)
-    # s[BPanel].compute_at(s[C], yo)
-    # s[Cpacked].compute_at(s[C], xo)
-    # s = s.normalize()
 
 
     # one line to build the function.
@@ -145,115 +139,10 @@ def test_gemm_tensor_tensorize_extern_asm():
         tcost = ftimer(a, b, c).mean
         print("TVM Tensorize %s: exec=%g GFLOPS" % (ctx, 2 * M * N * K / tcost / 10 ** 9))
         np.testing.assert_allclose(
-            c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-5)
-    check_device(target)
+            c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-4, atol=1e-4)
 
-
-def test_gemm_tensor_tensorize_extern_asm_prepacked():
-    def intrin_gemm(M, N, K):
-        assert M == 4
-        assert N == 24
-        dtype = 'float32'
-        A = tvm.placeholder((K, M), dtype=dtype, name='A')
-        B = tvm.placeholder((K, N), dtype=dtype, name='B')
-        k = tvm.reduce_axis((0, K), name='k')
-        C = tvm.compute((M, N), lambda m, n:
-                        tvm.sum(A[k, m] * B[k, n], axis=[k]), name='C')
-
-        Ab = tvm.decl_buffer(A.shape, A.dtype,
-                            name="A",
-                            offset_factor=4,
-                            strides=[M, 1])
-        Bb = tvm.decl_buffer(B.shape, B.dtype,
-                            name="B",
-                            offset_factor=24,
-                            strides=[N, 1])
-        Cb = tvm.decl_buffer(C.shape, C.dtype,
-                            name="C",
-                            offset_factor=1,
-                            strides=[tvm.var('ldc'), 1])
-
-        def intrin_func(ins, outs):
-            aa, bb = ins
-            cc = outs[0]
-            irb = tvm.ir_builder.create()
-            extern_call = tvm.call_extern(
-                "int32",
-                "sgemm_only_4x24__avx2",
-                K,
-                irb.buffer_ptr(aa),
-                aa.elem_offset,
-                irb.buffer_ptr(bb),
-                bb.elem_offset,
-                irb.buffer_ptr(cc),
-                cc.elem_offset,
-                cc.strides[0])
-            irb.emit(extern_call)
-            return irb.get()
-
-        with tvm.build_config():
-            return tvm.decl_tensor_intrin(C.op,
-                                          intrin_func,
-                                          binds={A: Ab, B: Bb, C: Cb})
-
-    MTile = 4
-    NTile = 24
-
-    assert M % MTile == 0
-    assert N % NTile == 0
-    A = tvm.placeholder((M, K), name='A', dtype='float32')
-    BPanel = tvm.placeholder((N / NTile, K, NTile), name='BPanel', dtype='float32')
-    APanel = tvm.compute(
-        (M / MTile, K, MTile), lambda mtile, k, m: A[m + mtile * MTile, k], name='APanel')
-
-    k = tvm.reduce_axis((0, K), name='k')
-    C = tvm.compute(
-        (M, N),
-        lambda m, n: tvm.sum(APanel[m / MTile, k, m % MTile] * BPanel[n / NTile, k, n % NTile], axis=[k]),
-        name='C')
-    s = tvm.create_schedule(C.op)
-
-    xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], MTile, NTile)
-    s[C].reorder(xo, yo, xi, yi)
-    gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
-    s[C].tensorize(xi, gemm_intrinsic_function)
-    (x, y, z) = APanel.op.axis
-    s[APanel].compute_at(s[C], xo)
-    # s[APanel].
-    # s[APanel].unroll(z)
-    # s[BPanel].vectorize(z)
-    # s[APanel].compute_at(s[C], yo)
-    # s[BPanel].compute_at(s[C], yo)
-    # s[Cpacked].compute_at(s[C], xo)
-    # s = s.normalize()
-
-
-    # one line to build the function.
-    def check_device(device):
-        ctx = tvm.context(device, 0)
-        with tvm.target.create(device):
-            print(tvm.lower(s, [A, BPanel, C], simple_mode=True))
-
-            f = tvm.build(s, [A, BPanel, C])
-            f.save(os.path.join(os.getcwd(), 'gemm_tensor_extern.asm'))
-            f.save(os.path.join(os.getcwd(), 'gemm_tensor_extern.ll'))
-            f.save(os.path.join(os.getcwd(), 'gemm_tensor_extern.o'))
-        # launch the kernel.
-        a_np = np.random.randn(M, K).astype(A.dtype)
-        bpanel_np = np.random.randn(N / NTile, K, NTile).astype(BPanel.dtype)
-
-        a = tvm.nd.array(a_np, ctx)
-        bpanel = tvm.nd.array(bpanel_np, ctx)
-        c = tvm.nd.array(np.zeros((M, N), dtype=C.dtype), ctx)
-        f(a, bpanel, c)
-        ftimer = f.time_evaluator(f.entry_name, ctx, number=REPEATS)
-        tcost = ftimer(a, bpanel, c).mean
-        print("TVM Tensor Pre-Packed  %s: exec=%g GFLOPS" % (ctx, 2 * M * N * K / tcost / 10 ** 9))
-        # np.testing.assert_allclose(
-        #     c.asnumpy(), np.dot(a_np, b_np.T), rtol=1e-5)
     check_device(target)
 
 
 test_gemm_tensor_tensorize_extern_asm()
-test_gemm_tensor_tensorize_extern_asm_prepacked()
 test_gemm_blas()

@@ -45,8 +45,8 @@ import timeit
 # (M, K) x (K, N)
 # You are free to try out different shapes, sometimes TVM optimization outperforms numpy with MKL.
 M = 768
-K = 768
-N = 768
+K = 128
+N = 288
 FLOPS = 2 * M * N * K
 # The default tensor type in tvm
 dtype = "float32"

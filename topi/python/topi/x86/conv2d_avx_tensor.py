@@ -2,7 +2,7 @@ import tvm
 import numpy as np
 import topi
 import topi.testing
-from topi.util import get_const_tuple
+from topi.util import get_const_tuple, get_const_int
 from topi import tag
 
 target = 'llvm -mcpu=core-avx2'
@@ -154,16 +154,29 @@ def schedule_conv2d_nchw_tensor(outs):
 
             A_W_product = op.input_tensors[0]
             A_tile = A_W_product.op.input_tensors[0]
+            x, y, z = A_tile.op.axis
+            s[A_tile].unroll(z)
+            xo, xi = s[A_tile].split(x, factor=4)
+            s[A_tile].reorder(xo, y, xi, z)
             W_tile = A_W_product.op.input_tensors[1]
+            # x, y, z = W_tile.op.axis
+            # s[W_tile].unroll(z)
             print(A_tile, W_tile, A_W_product)
-            assert MMTile % MTile == 0
-            xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MMTile, NTile)
+            M = get_const_int(A_W_product.op.axis[0].dom.extent)
+            assert M % MTile == 0
+            MTileUnroll = 1
+            for i in range(8, 0, -1):
+                if M % (MTile * i) == 0:
+                    MTileUnroll = i
+                    break
+
+            xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile)
             s[A_W_product].reorder(xo, yo, xi, yi)
-            s[A_W_product].compute_root()
+            # s[A_W_product].compute_root()
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
             k, = s[A_W_product].op.reduce_axis
             print("K", k, k.dom.extent)
-            s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=k.dom.extent))
+            s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=get_const_int(k.dom.extent)))
             n, h, w, c = op.axis
             fused = s[op].fuse(n, h, w)
             s[op].parallel(fused)
@@ -208,13 +221,15 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
             C = B # topi.nn.relu(B)
 
             s1 = schedule_conv2d_nchw_tensor([B, G])
-            print(tvm.lower(s1, [A, W, B], simple_mode=True))
             s2 = schedule_conv2d_nchw_tensor([C, G])
             print(tvm.lower(s2, [A, W, B], simple_mode=True))
 
             B_baseline = topi.nn.conv2d(A, W, stride, padding, layout='NCHW')
             s_baseline = topi.generic.schedule_conv2d_nchw([B_baseline])
             print("Baseline", tvm.lower(s_baseline, [A, W, B], simple_mode=True))
+
+            print(tvm.lower(s1, [A, W, B], simple_mode=True))
+
         a = tvm.nd.array(a_np, ctx)
         w = tvm.nd.array(w_np, ctx)
         b = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
@@ -225,7 +240,7 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
             func2 = tvm.build(s2, [A, W, C], device, name="relu_%d_%d_%d_%d_%d_%d_%d_%d" % (batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation))
             func1(a, w, b)
             func2(a, w, c)
-            REPEAT = 10
+            REPEAT = 100
             FLOPS = 2 * batch * in_channel * in_size * in_size * kernel * kernel * num_filter
             evaluator1 = func1.time_evaluator(func1.entry_name, ctx, number=REPEAT)
             evaluator2 = func2.time_evaluator(func2.entry_name, ctx, number=REPEAT)
@@ -239,7 +254,7 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
             np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
             evaluator_baseline = func1_baseline.time_evaluator(func1_baseline.entry_name, ctx, number=REPEAT)
             print('Tensor1x1 Baseline: %f' % (FLOPS / evaluator_baseline(a, w, b).mean / 1E9))
-
+            print("M, N, K: ", batch * in_size * in_size, num_filter, kernel * kernel * in_channel)
     for device in [target]:
         check_device(device)
 

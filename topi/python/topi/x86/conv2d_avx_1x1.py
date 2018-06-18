@@ -13,6 +13,8 @@ AVXConv1x1Fwd = namedtuple('AVXConv1x1Fwd', ['ic_bn', 'oc_bn', 'oh_factor', 'ow_
 
 
 def _get_default_schedule(wkl, simd_width):
+    print("Getting default schedule")
+    print(wkl, simd_width)
     HPAD, WPAD = wkl.hpad, wkl.wpad
     HSTR, WSTR = wkl.hstride, wkl.wstride
     out_height = (wkl.height + 2 * HPAD - wkl.hkernel) // HSTR + 1
@@ -29,20 +31,25 @@ def _get_default_schedule(wkl, simd_width):
         if wkl.in_filter % bn == 0:
             ic_bn = bn
             break
+    # import pdb
+    # pdb.set_trace()
 
     for ow_factor in range(out_width, 0, -1):
         if out_width % ow_factor == 0:
             for oh_factor in range(out_height, 0, -1):
                 if out_height % oh_factor == 0 and ow_factor * oh_factor < 32:
+                    print("Returing AVXConv1x1Fwd")
                     return AVXConv1x1Fwd(ic_bn, oc_bn, oh_factor, ow_factor)
 
     raise ValueError("cannot decide default schedule for workload: {}".format(wkl))
 
 
 def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
+    print("Decl", data, kernel, stride, padding, layout, out_dtype)
     assert layout == 'NCHW', "only support NCHW convolution for AVX"
     wkl = _get_workload(data, kernel, stride, padding, out_dtype)
     sch = _get_schedule(wkl)
+    print("Schedule: ", sch)
 
     HPAD, WPAD = wkl.hpad, wkl.wpad
     HSTR, WSTR = wkl.hstride, wkl.wstride
@@ -84,6 +91,7 @@ def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
 
 
 def _schedule_conv(s, data, data_pad, data_vec, kernel, kernel_vec, conv_out, output, last):
+    print("Scheduling conv")
     # no stride and padding info here
     padding = infer_pad(data, data_pad)
     if data_pad is None:
@@ -155,6 +163,7 @@ def _schedule_conv(s, data, data_pad, data_vec, kernel, kernel_vec, conv_out, ou
 
 
 def _declaration_conv_NCHWc(wkl, sch, data, kernel):
+    print("Using NCHWc")
     out_dtype = wkl.out_dtype
     HPAD, WPAD = wkl.hpad, wkl.wpad
     HSTR, WSTR = wkl.hstride, wkl.wstride
@@ -181,6 +190,7 @@ def _declaration_conv_NCHWc(wkl, sch, data, kernel):
 
 
 def _schedule_conv_NCHWc(s, wkl, sch, data, kernel, conv_out, last):
+    print("Scheduling NCHWc")
     # schedule data
     A = data
     if isinstance(s[A].op, tvm.tensor.ComputeOp):

@@ -97,6 +97,7 @@ def _get_schedule_conv(wkl):
         return conv2d_avx_common._get_default_schedule(wkl, fp32_vec_len)
     idx = _WORKLOADS_AVX.index(wkl)
     sch = _SCHEDULES_AVX[idx]
+    print("Got schedule: ", sch)
     return sch
 
 
@@ -109,6 +110,7 @@ def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
     out_dtype = data.dtype if out_dtype is None else out_dtype
     target = tvm.target.current_target(allow_none=False)
     wkl = _get_workload(data, kernel, stride, padding, out_dtype)
+    print("Workload!!!", wkl)
     if 'avx' in str(target) and layout == 'NCHW':
         sch = _get_schedule(wkl)
         return _AVX_SCH_TO_DECL_FUNC[type(sch)](data, kernel, stride, padding, layout, out_dtype)

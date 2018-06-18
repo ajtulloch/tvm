@@ -105,12 +105,13 @@ def _get_schedule_conv(wkl):
 def _declaration_conv(data, kernel, stride, padding, layout, out_dtype):
     _AVX_SCH_TO_DECL_FUNC = {
         AVXConvCommonFwd: conv2d_avx_common._declaration_conv,
-        AVXConv1x1Fwd: conv2d_avx_1x1._declaration_conv
+        AVXConv1x1Fwd: conv2d_avx_1x1._declaration_conv,
     }
     out_dtype = data.dtype if out_dtype is None else out_dtype
     target = tvm.target.current_target(allow_none=False)
     wkl = _get_workload(data, kernel, stride, padding, out_dtype)
     print("Workload!!!", wkl)
+
     if 'avx' in str(target) and layout == 'NCHW':
         sch = _get_schedule(wkl)
         return _AVX_SCH_TO_DECL_FUNC[type(sch)](data, kernel, stride, padding, layout, out_dtype)
@@ -179,10 +180,22 @@ def schedule_conv2d(outs):
     """Create schedule for tensors"""
     _AVX_SCH_TO_SCH_FUNC = {
         AVXConvCommonFwd: conv2d_avx_common._schedule_conv,
-        AVXConv1x1Fwd: conv2d_avx_1x1._schedule_conv
+        AVXConv1x1Fwd: conv2d_avx_1x1._schedule_conv,
     }
-    s = tvm.create_schedule([x.op for x in outs])
     target = tvm.target.current_target(allow_none=False)
+
+    # Find the GEMM tensor and materialize it.
+    output_ops = [x.op for x in outs]
+    def traverse(op):
+        for tensor in op.input_tensors:
+            if tensor.op.input_tensors:
+                traverse(tensor.op)
+
+        if 'conv2d_nchw_tensor' in op.tag:
+            if 'avx' in str(target):
+                output_ops.append(conv2d_avx_1x1.OPS_TO_GEMM[op])
+    traverse(outs[0].op)
+    s = tvm.create_schedule(output_ops)
 
     def default_schedule(op):
         """NCHW conv2d schedule for non imagenet workloads"""
@@ -226,7 +239,10 @@ def schedule_conv2d(outs):
                 if tensor.op.input_tensors:
                     traverse(tensor.op)
 
-        if 'conv2d_nchw' in op.tag:
+        if 'conv2d_nchw_tensor' in op.tag:
+            if 'avx' in str(target):
+                return conv2d_avx_1x1._schedule_conv_tensor(s, op)
+        elif 'conv2d_nchw' in op.tag:
             if 'avx' in str(target):
                 try:
                     output = op.output(0)

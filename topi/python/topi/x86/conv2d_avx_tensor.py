@@ -122,7 +122,7 @@ def conv2d_nchw_tensor(A, W_, stride, padding, layout):
         output_shape,
         _unpack_output,
         name="A_W_product_NCHW",
-        tag='conv2d_nchw')
+        tag='conv2d_nchw_tensor')
 
     return (unpacked_nchw, A_W_product)
 
@@ -177,6 +177,7 @@ def schedule_conv2d_nchw_tensor(outs):
             k, = s[A_W_product].op.reduce_axis
             print("K", k, k.dom.extent)
             s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=get_const_int(k.dom.extent)))
+            # s[A_W_product].unroll(xii)
             n, h, w, c = op.axis
             fused = s[op].fuse(n, h, w)
             s[op].parallel(fused)

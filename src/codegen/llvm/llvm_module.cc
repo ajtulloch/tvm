@@ -139,7 +139,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
       mlib->setTargetTriple(tm_->getTargetTriple().str());
       mlib->setDataLayout(tm_->createDataLayout());
       for (llvm::Function &f : mlib->functions()) {
-        // f.addFnAttr(llvm::Attribute::AlwaysInline);
+        f.addFnAttr(llvm::Attribute::AlwaysInline);
       }
       cg->AddLinkModule(std::move(mlib));
     }

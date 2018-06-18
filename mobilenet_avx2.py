@@ -22,7 +22,7 @@ def main():
     parser.add_argument('--opt-level', type=int, default=1, help="Level of optimization.")
     parser.add_argument('--num-iter', type=int, default=50, help="Number of iteration during benchmark.")
     args = parser.parse_args()
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     opt_level = args.opt_level
 
     num_iter = args.num_iter

@@ -23,8 +23,8 @@ NTile = 24
 
 # Tensorized
 def intrin_gemm(M, N, K):
-    assert M == 4
-    assert N == 24
+    assert M == MTile
+    assert N == NTile
     dtype = 'float32'
     A = tvm.placeholder((K, M), dtype=dtype, name='A')
     B = tvm.placeholder((K, N), dtype=dtype, name='B')
@@ -34,11 +34,11 @@ def intrin_gemm(M, N, K):
 
     Ab = tvm.decl_buffer(A.shape, A.dtype,
                         name="A",
-                        offset_factor=4,
+                        offset_factor=MTile,
                         strides=[M, 1])
     Bb = tvm.decl_buffer(B.shape, B.dtype,
                         name="B",
-                        offset_factor=24,
+                        offset_factor=NTile,
                         strides=[N, 1])
     Cb = tvm.decl_buffer(C.shape, C.dtype,
                         name="C",
@@ -96,8 +96,6 @@ def conv2d_nchw_tensor(A, W_, stride, padding, layout):
         return tvm.select(n < N, A[n, c, h, w], 0.0)
 
     A_tile = tvm.compute(A_tile_shape, _A_tile, name="A_tile")
-
-
     W_tile_shape = (div_round_up(COut, NTile), CIn, NTile)
 
     def _W_tile(tile_idx, c, tile_elem):
@@ -108,6 +106,7 @@ def conv2d_nchw_tensor(A, W_, stride, padding, layout):
     W_tile = tvm.compute(W_tile_shape, _W_tile, name="W_tile")
 
     k = tvm.reduce_axis((0, CIn), name='k')
+
 
     A_W_product = tvm.compute(
         (A_tile_shape[0] * MTile, W_tile_shape[0] * NTile),
@@ -165,6 +164,10 @@ def schedule_conv2d_nchw_tensor(outs):
             k, = s[A_W_product].op.reduce_axis
             print("K", k, k.dom.extent)
             s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=k.dom.extent))
+            n, h, w, c = op.axis
+            fused = s[op].fuse(n, h, w)
+            s[op].parallel(fused)
+            s[op].vectorize(c)
 
     traverse(output_op)
     return s
@@ -208,6 +211,10 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
             print(tvm.lower(s1, [A, W, B], simple_mode=True))
             s2 = schedule_conv2d_nchw_tensor([C, G])
             print(tvm.lower(s2, [A, W, B], simple_mode=True))
+
+            B_baseline = topi.nn.conv2d(A, W, stride, padding, layout='NCHW')
+            s_baseline = topi.generic.schedule_conv2d_nchw([B_baseline])
+            print("Baseline", tvm.lower(s_baseline, [A, W, B], simple_mode=True))
         a = tvm.nd.array(a_np, ctx)
         w = tvm.nd.array(w_np, ctx)
         b = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
@@ -225,7 +232,13 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
             np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
             np.testing.assert_allclose(c.asnumpy(), c_np, rtol=1e-5)
             print('Tensor1x1: %f' % (FLOPS / evaluator1(a, w, b).mean / 1E9))
-            # print('Tensor1x1+Relu: %f' % (FLOPS / evaluator2(a, w, c).mean / 1E9))
+
+            func1_baseline = tvm.build(s_baseline, [A, W, B], device, name="conv2d_baseline_%d_%d_%d_%d_%d_%d_%d_%d" % (batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation))
+
+            func1_baseline(a, w, b)
+            np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
+            evaluator_baseline = func1_baseline.time_evaluator(func1_baseline.entry_name, ctx, number=REPEAT)
+            print('Tensor1x1 Baseline: %f' % (FLOPS / evaluator_baseline(a, w, b).mean / 1E9))
 
     for device in [target]:
         check_device(device)

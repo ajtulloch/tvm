@@ -252,11 +252,11 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             if tile_in_k:
                 k, = A_W_product.op.reduce_axis
                 ko, ki = s[A_W_product].split(k, factor=KTile)
-                s[A_W_product].reorder(xo, yo, ko, yii, xii, xiii, yiii, ki)
+                s[A_W_product].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
                 # s[A_tile].compute_at(s[A_W_product], xo)
                 # s[W_tile].compute_at(s[A_W_product], ko)
             else:
-                s[A_W_product].reorder(xo, yo, yii, xii, xiii, yiii)
+                s[A_W_product].reorder(yo, xo, yii, xii, xiii, yiii)
 
             s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile if tile_in_k else K))
             # s[A_W_product].unroll(xii)
@@ -342,7 +342,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         np.testing.assert_allclose(b_tensor_mxn.asnumpy(), b_np, rtol=1e-5)
         (_, _, out_size, _)= get_const_tuple(B.shape)
         FLOPS = 2 * batch * in_channel * out_size * out_size * kernel * kernel * num_filter
-        REPEAT = 10
+        REPEAT = 20
 
         def gflops(t):
             return FLOPS / t / 1E9

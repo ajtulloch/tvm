@@ -321,17 +321,17 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 def test_conv2d_nhwc():
         # ResNet18 worklaods
     speedups = [
-        # verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3),
-        # verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1),
-        # verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0),
-        # verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1),
-        # verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0),
-        # verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1),
-        # verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1),
-        # verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0),
-        # verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1),
-        # verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1),
-        # verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0),
+        verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3),
+        verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1),
+        verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0),
+        verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1),
+        verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0),
+        verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1),
+        verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1),
+        verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0),
+        verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1),
+        verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1),
+        verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0),
         verify_conv2d_nhwc(1, 512, 7, 512, 3, 1, 1),
     ]
     import scipy.stats.mstats

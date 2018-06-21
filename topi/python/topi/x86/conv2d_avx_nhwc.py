@@ -7,6 +7,8 @@ import topi.testing
 from tvm.contrib.pickle_memoize import memoize
 from topi.util import get_const_tuple, get_const_int
 from topi import tag
+import scipy.stats.mstats
+import collections
 
 target = 'llvm -mcpu=core-avx2'
 
@@ -106,7 +108,7 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
     (N, IH, IW, CIn) = get_const_tuple(A.shape)
     (KH, KW, CIn_, COut) = get_const_tuple(W_.shape)
     assert CIn == CIn_
-    assert stride == 1, stride
+    # assert stride == 1, stride
     assert padding == 0
 
 
@@ -216,7 +218,7 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
 
             xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile)
             s[A_W_product].reorder(xo, yo, xi, yi)
-            s[A_tile].compute_at(s[A_W_product], xo)
+            # s[A_tile].compute_at(s[A_W_product], xo)
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
             k, = s[A_W_product].op.reduce_axis
             s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=get_const_int(k.dom.extent)))
@@ -234,7 +236,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
     print("N: {}, CIn: {}, H/W: {}, COut: {}, KH/KW: {}".format(batch, in_channel, in_size, num_filter, kernel))
     in_height = in_width = in_size
     # kernel = 1
-    stride = 1
+    # stride = 1
     padding = 0
     dilation = 1
     A = tvm.placeholder((batch, in_height, in_width, in_channel), name='A')
@@ -301,8 +303,8 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
         # np.testing.assert_allclose(b_tensor.asnumpy(), b_np, rtol=1e-5)
         np.testing.assert_allclose(b_tensor_mxn.asnumpy(), b_np, rtol=1e-5)
-
-        FLOPS = 2 * batch * in_channel * in_size * in_size * kernel * kernel * num_filter
+        (_, _, out_size, _)= get_const_tuple(B.shape)
+        FLOPS = 2 * batch * in_channel * out_size * out_size * kernel * kernel * num_filter
         REPEAT = 10
 
         def gflops(t):
@@ -320,22 +322,93 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
 def test_conv2d_nhwc():
         # ResNet18 worklaods
-    speedups = [
-        verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3),
-        verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1),
-        verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0),
-        verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1),
-        verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0),
-        verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1),
-        verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1),
-        verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0),
-        verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1),
-        verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1),
-        verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0),
-        verify_conv2d_nhwc(1, 512, 7, 512, 3, 1, 1),
+    # speedups = [
+    #     verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3),
+    #     verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1),
+    #     verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0),
+    #     verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1),
+    #     verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0),
+    #     verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1),
+    #     verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1),
+    #     verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0),
+    #     verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1),
+    #     verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1),
+    #     verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0),
+    #     verify_conv2d_nhwc(1, 512, 7, 512, 3, 1, 1),
+    # ]
+    # import scipy.stats.mstats
+    # print("RESNET-18 GEOMEAN: {:.2f}".format(scipy.stats.mstats.gmean(speedups)))
+
+    Workload = collections.namedtuple(
+        'Workload',
+        ['in_dtype', 'out_dtype', 'height', 'width', 'in_filter', 'out_filter',
+         'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
+
+    RESNET_50 = [
+        Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 2048, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 2048, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 2048, 512, 1, 1, 0, 0, 1, 1),
     ]
-    import scipy.stats.mstats
-    print("GEOMEAN: {:.2f}".format(scipy.stats.mstats.gmean(speedups)))
+
+    RESNET_18 = [
+        Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
+        Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 128, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 128, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 256, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 512, 3, 3, 1, 1, 1, 1),
+    ]
+
+    MOBILENET = [
+        Workload('float32', 'float32', 224, 224, 3, 32, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 256, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 512, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
+    ]
+
+    def run(workload, name):
+        speedups = [verify_conv2d_nhwc(1, w.in_filter, w.height, w.out_filter, w.hkernel, w.hstride, w.hpad, 1) for w in workload]
+        print("{}: {:.2f}".format(name, scipy.stats.mstats.gmean(speedups)))
+
+    run(RESNET_18, "RESNET-18")
+    run(MOBILENET, "MOBILENET")
+    run(RESNET_50, "RESNET-50")
+
+    # speedups = [
+    #     verify_conv2d_nhwc(1, 64, 256, 56, 1, 1, 0),
+    #     verify_conv2d_nhwc(1, 256, 64, 56, 1, 1, 0),
+
+    #     verify_conv2d_nhwc(1, 256, 128, 56, 1, 2, 0),
+    #     verify_conv2d_nhwc(1, 128, 512, 28, 1, 1, 0),
+
+    #     verify_conv2d_nhwc(1, 256, 512, 56, 1, 2, 0),
+    #     verify_conv2d_nhwc(1, 512, 256, 28, 1, 2, 0),
+
+    # ]
+    # print("RESNET-50 GEOMEAN: {:.2f}".format(scipy.stats.mstats.gmean(speedups)))
 
     # # Vgg16 workloads
     # verify_conv2d_nhwc(1, 128, 122, 128, 3, 1, 1)

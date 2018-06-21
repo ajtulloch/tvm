@@ -4,7 +4,7 @@
 #include <string.h>
 #include <x86intrin.h>
 
-void sgemm_only_4x24__avx2(int32_t k, const float *a, int32_t a_off,
+void sgemm_compute_4x24__avx2(int32_t k, const float *a, int32_t a_off,
                            const float *b, int32_t b_off, float *c,
                            int32_t c_off, int32_t ldc) {
   a = a + a_off;

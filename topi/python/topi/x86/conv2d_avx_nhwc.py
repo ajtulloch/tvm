@@ -63,7 +63,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_only_4x24__avx2",
+                "sgemm_compute_4x24__avx2",
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -248,8 +248,6 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile * NTileUnroll)
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
             yii, yiii = s[A_W_product].split(yi, factor=NTile)
-
-            print("MTileUnroll: {}, NTileUnroll: {}".format(MTileUnroll, NTileUnroll))
             tile_in_k = K > KTile and MTileUnroll > 1
             if tile_in_k:
                 k, = A_W_product.op.reduce_axis

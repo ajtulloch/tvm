@@ -51,20 +51,50 @@ def intrin_gemm(M, N, K):
     def intrin_func(ins, outs):
         aa, bb = ins
         cc = outs[0]
-        irb = tvm.ir_builder.create()
-        extern_call = tvm.call_extern(
-            "int32",
-            "sgemm_only_4x24__avx2",
-            K,
-            irb.buffer_ptr(aa),
-            aa.elem_offset,
-            irb.buffer_ptr(bb),
-            bb.elem_offset,
-            irb.buffer_ptr(cc),
-            cc.elem_offset,
-            cc.strides[0])
-        irb.emit(extern_call)
-        return irb.get()
+
+        def body():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "sgemm_only_4x24__avx2",
+                K,
+                irb.buffer_ptr(aa),
+                aa.elem_offset,
+                irb.buffer_ptr(bb),
+                bb.elem_offset,
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+
+        def reset():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "sgemm_reset_4x24__avx2",
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+
+        def update():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "sgemm_update_4x24__avx2",
+                K,
+                irb.buffer_ptr(aa),
+                aa.elem_offset,
+                irb.buffer_ptr(bb),
+                bb.elem_offset,
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+        return body(), reset(), update()
 
     with tvm.build_config():
         return tvm.decl_tensor_intrin(C.op,
@@ -98,9 +128,11 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         spatial_idx = tile_elem + tile_idx * MTile
 
         n = spatial_idx // OH // OW
-        c_in = channel_idx // KH // KW
-        h_in = spatial_idx // OW % OH*stride + channel_idx // KW % KH
-        w_in = spatial_idx % OW*stride + channel_idx % KW
+        c_in = channel_idx % CIn
+        c_kw = channel_idx // CIn % KW
+        c_kh = channel_idx // CIn // KW
+        h_in = spatial_idx // OW % OH*stride + c_kh
+        w_in = spatial_idx % OW*stride + c_kw
         return tvm.select(
             spatial_idx < N * OH * OW, #tvm.all(n < N, h_in < IH, w_in < IW),
             A[n, h_in, w_in, c_in],
@@ -112,10 +144,10 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
 
     def _W_tile(tile_idx, channel_idx, tile_elem):
         c_out = tile_elem + tile_idx * NTile
-        c_in = channel_idx // KH // KW
-        kh = channel_idx // KW % KH
-        kw = channel_idx % KW
-        return tvm.select(c_out < COut, W_[kh, kw, c_in, c_out], 0.0)
+        c_in = channel_idx % CIn
+        c_kw = channel_idx // CIn % KW
+        c_kh = channel_idx // CIn // KW
+        return tvm.select(c_out < COut, W_[c_kh, c_kw, c_in, c_out], 0.0)
 
     W_tile = tvm.compute(W_tile_shape, _W_tile, name="W_tile")
 
@@ -165,15 +197,15 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             A_W_product = op.input_tensors[0]
             A_tile = A_W_product.op.input_tensors[0]
             x, y, z = A_tile.op.axis
-            # s[A_tile].reorder(x, z, y)
             s[A_tile].unroll(z)
+            # s[A_tile].reorder(x, z, y)
             # s[A_tile].vectorize(y)
-            xo, xi = s[A_tile].split(x, factor=4)
-            s[A_tile].reorder(xo, y, xi, z)
+            # xo, xi = s[A_tile].split(x, factor=4)
+            # s[A_tile].reorder(xo, y, xi, z)
             W_tile = A_W_product.op.input_tensors[1]
             x, y, z = W_tile.op.axis
             # s[W_tile].reorder(x, z, y)
-            # s[W_tile].vectorize(z)
+            s[W_tile].unroll(z)
             M = get_const_int(A_W_product.op.axis[0].dom.extent)
             assert M % MTile == 0
             MTileUnroll = 1
@@ -184,7 +216,7 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
 
             xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile)
             s[A_W_product].reorder(xo, yo, xi, yi)
-            # s[A_tile].compute_at(s[A_W_product], xo)
+            s[A_tile].compute_at(s[A_W_product], xo)
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
             k, = s[A_W_product].op.reduce_axis
             s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=get_const_int(k.dom.extent)))
@@ -288,18 +320,23 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
 def test_conv2d_nhwc():
         # ResNet18 worklaods
-    # verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3)
-    # verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1)
-    # verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0)
-    # verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1)
-    # verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0)
-    # verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1)
-    # verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1)
-    # verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0)
-    # verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1)
-    # verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1)
-    # verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0)
-    verify_conv2d_nhwc(1, 512, 7, 512, 3, 1, 1)
+    speedups = [
+        # verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3),
+        # verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1),
+        # verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0),
+        # verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1),
+        # verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0),
+        # verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1),
+        # verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1),
+        # verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0),
+        # verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1),
+        # verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1),
+        # verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0),
+        verify_conv2d_nhwc(1, 512, 7, 512, 3, 1, 1),
+    ]
+    import scipy.stats.mstats
+    print("GEOMEAN: {:.2f}".format(scipy.stats.mstats.gmean(speedups)))
+
     # # Vgg16 workloads
     # verify_conv2d_nhwc(1, 128, 122, 128, 3, 1, 1)
     # # Super resolution workloads

@@ -191,6 +191,89 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
 
     return unpacked_nhwc
 
+def conv2d_nchw_tensor_mxn(A, W_, stride, padding):
+    dtype = A.dtype
+    (N, CIn, IH, IW) = get_const_tuple(A.shape)
+    (COut, CIn_, KH, KW) = get_const_tuple(W_.shape)
+    assert CIn == CIn_
+    # assert stride == 1, stride
+    assert padding == 0
+
+    OH = (IH + 2*padding - KH) // stride + 1
+    OW = (IW + 2*padding - KW) // stride + 1
+
+    def div_round_up(a, b):
+        return (a + b - 1) // b
+
+    def round_up(a, b):
+        return (a + b - 1) // b * b
+
+
+    tile_in_k = CIn * KH * KW >= 2 * KTile
+    K = CIn * KH * KW if not tile_in_k else round_up(CIn * KH * KW, KTile)
+
+    # [N * H * W // TILE, KH * KW * C, TILE]
+    A_tile_shape = (div_round_up(N * OH * OW, MTile), K, MTile)
+
+    def _A_tile(tile_idx, channel_idx, tile_elem):
+        spatial_idx = tile_elem + tile_idx * MTile
+
+        n = spatial_idx // OH // OW
+        c_in = channel_idx % CIn
+        c_kw = channel_idx // CIn % KW
+        c_kh = channel_idx // CIn // KW
+        h_in = spatial_idx // OW % OH*stride + c_kh
+        w_in = spatial_idx % OW*stride + c_kw
+        conds = []
+        if N * OH * OW % MTile != 0:
+            conds += [spatial_idx < N * OH * OW]
+        if tile_in_k and CIn * KH * KW % KTile != 0:
+            conds += [channel_idx < CIn * KH * KW]
+
+        return tvm.select(tvm.all(*conds), A[n, c_in, h_in, w_in], 0.0) if conds else A[n, c_in, h_in, w_in]
+
+    A_tile = tvm.compute(A_tile_shape, _A_tile, name="A_tile")
+
+    W_tile_shape = (div_round_up(COut, NTile), K, NTile)
+
+    def _W_tile(tile_idx, channel_idx, tile_elem):
+        c_out = tile_elem + tile_idx * NTile
+        c_in = channel_idx % CIn
+        c_kw = channel_idx // CIn % KW
+        c_kh = channel_idx // CIn // KW
+        conds = []
+        if COut % NTile != 0:
+            conds += [c_out < COut]
+        if tile_in_k and CIn * KH * KW % KTile != 0:
+            conds += [channel_idx < CIn * KH * KW]
+
+        return tvm.select(tvm.all(*conds), W_[c_out, c_in, c_kh, c_kw], 0.0) if conds else W_[c_out, c_in, c_kh, c_kw]
+
+    W_tile = tvm.compute(W_tile_shape, _W_tile, name="W_tile")
+
+    k = tvm.reduce_axis((0, K), name='k')
+
+    A_W_product = tvm.compute(
+        (A_tile_shape[0] * MTile, W_tile_shape[0] * NTile),
+        lambda m, n: tvm.sum(
+            A_tile[m / MTile, k, m % MTile] * W_tile[n / NTile, k, n % NTile],
+            axis=[k]),
+        name='A_W_product')
+
+    output_shape = (N, COut, OH, OW)
+
+    def _unpack_output(n, c, h, w):
+        m_idx = w + h * OW + n * OH * OW
+        return A_W_product[m_idx, c] + tvm.const(0, A_W_product.dtype) * A_W_product[A_W_product.shape[0] - 1, A_W_product.shape[1] - 1]
+
+    unpacked_nhwc = tvm.compute(
+        output_shape,
+        _unpack_output,
+        name="A_W_product_nchw",
+        tag='conv2d_nchw_tensor')
+
+    return unpacked_nhwc
+
 def schedule_conv2d_nhwc_tensor_mxn(outs):
     s = tvm.create_schedule([x.op for x in outs])
     output_op = outs[0].op
@@ -215,8 +298,8 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             A_W_product = op.input_tensors[0]
             A_tile = A_W_product.op.input_tensors[0]
             x, y, z = A_tile.op.axis
-            zo, zi = s[A_tile].split(z, 8)
-            s[A_tile].reorder(x, zo, y, zi)
+            # zo, zi = s[A_tile].split(z, 8)
+            # s[A_tile].reorder(x, zo, y, zi)
             # s[A_tile].vectorize(zi)
             # s[A_tile].unroll(z)
             # s[A_tile].reorder(x, z, y)
@@ -268,6 +351,83 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
     traverse(output_op)
     return s
 
+def schedule_conv2d_nchw_tensor_mxn(outs):
+    s = tvm.create_schedule([x.op for x in outs])
+    output_op = outs[0].op
+    def traverse(op):
+        """Traverse operators from computation graph"""
+        # inline all one-to-one-mapping operators except the last stage (output)
+        if tag.is_broadcast(op.tag):
+            if op not in s.outputs:
+                s[op].compute_inline()
+            else: # inject custom schedule
+                if len(op.axis) == 4: # schedule bias + bn + relu
+                    n, c, h, w = op.axis
+                    # fused = s[op].fuse(n, h, w)
+                    # s[op].parallel(fused)
+                    # s[op].vectorize(c)
+            for tensor in op.input_tensors:
+                if tensor.op.input_tensors:
+                    traverse(tensor.op)
+        if 'conv2d_nchw' in op.tag:
+            output = op.output(0)
+
+            A_W_product = op.input_tensors[0]
+            A_tile = A_W_product.op.input_tensors[0]
+            x, y, z = A_tile.op.axis
+            # zo, zi = s[A_tile].split(z, 8)
+            # s[A_tile].reorder(x, zo, y, zi)
+            # s[A_tile].vectorize(zi)
+            s[A_tile].unroll(z)
+            # s[A_tile].reorder(x, z, y)
+
+            # xo, xi = s[A_tile].split(x, factor=4)
+            # s[A_tile].reorder(xo, y, xi, z)
+
+            W_tile = A_W_product.op.input_tensors[1]
+            x, y, z = W_tile.op.axis
+            # s[W_tile].unroll(z)
+            zo, zi = s[W_tile].split(z, 8)
+            s[W_tile].reorder(x, zo, y, zi)
+            s[W_tile].vectorize(zi)
+            M = get_const_int(A_W_product.op.axis[0].dom.extent)
+            N = get_const_int(A_W_product.op.axis[1].dom.extent)
+            assert M % MTile == 0
+            MTileUnroll = 1
+            for i in range(24, 0, -1):
+                if M % (MTile * i) == 0:
+                    MTileUnroll = i
+                    break
+            NTileUnroll = 1
+            for i in range(6, 0, -1):
+                if N % (NTile * i) == 0:
+                    NTileUnroll = i
+                    break
+
+            K = get_const_int(A_W_product.op.reduce_axis[0].dom.extent)
+            xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile * NTileUnroll)
+            xii, xiii = s[A_W_product].split(xi, factor=MTile)
+            yii, yiii = s[A_W_product].split(yi, factor=NTile)
+            tile_in_k = K >= 2 * KTile and MTileUnroll > 1
+            if tile_in_k:
+                k, = A_W_product.op.reduce_axis
+                ko, ki = s[A_W_product].split(k, factor=KTile)
+                s[A_W_product].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
+                # s[A_tile].compute_at(s[A_W_product], xo)
+                # s[W_tile].compute_at(s[A_W_product], ko)
+            else:
+                s[A_W_product].reorder(yo, xo, yii, xii, xiii, yiii)
+
+            s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile if tile_in_k else K))
+            # s[A_W_product].unroll(xii)
+            n, c, h, w = op.axis
+            # fused = s[op].fuse(n, h, w)
+            # s[op].parallel(fused)
+            # s[op].vectorize(c)
+
+    traverse(output_op)
+    return s
+
 X = True
 def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
     print("N: {}, CIn: {}, H/W: {}, COut: {}, KH/KW: {}".format(batch, in_channel, in_size, num_filter, kernel))
@@ -303,15 +463,15 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
             # dW = topi.nn.dilate(W, (1, dilation, dilation, 1))
             B = topi.nn.conv2d_nhwc(A, dW, stride, padding)
             B_NCHW = topi.nn.conv2d(A_NCHW, W_NCHW, stride, padding, layout='NCHW')
-
+            B_NCHW_tensor_mxn = conv2d_nchw_tensor_mxn(A_NCHW, W_NCHW, stride, padding)
             # B_tensor = conv2d_nhwc_tensor_1x1(A, dW, stride, padding)
             B_tensor_mxn = conv2d_nhwc_tensor_mxn(A, dW, stride, padding)
             # s_tensor = schedule_conv2d_nhwc_tensor_1x1([B_tensor])
             s_tensor_mxn = schedule_conv2d_nhwc_tensor_mxn([B_tensor_mxn])
-
+            s_nchw_tensor_mxn = schedule_conv2d_nchw_tensor_mxn([B_NCHW_tensor_mxn])
             global X
             if X:
-                print(tvm.lower(s_tensor_mxn, [A, W, B_tensor_mxn], simple_mode=True))
+                print(tvm.lower(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], simple_mode=True))
             X = False
 
 
@@ -328,19 +488,23 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         b_nchw = tvm.nd.array(np.zeros(get_const_tuple(B_NCHW.shape), dtype=B_NCHW.dtype), ctx)
         # b_tensor = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
+        b_nchw_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B_NCHW.shape), dtype=B.dtype), ctx)
         func = tvm.build(s, [A, W, B], device)
         func_nchw = tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], device)
         # func_tensor = tvm.build(s_tensor, [A, W, B_tensor], device)
         func_tensor_mxn = tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], device)
+        func_nchw_tensor_mxn = tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], device)
         func(a, w, b)
         func_nchw(a_nchw, w_nchw, b_nchw)
         # func_tensor(a, w, b_tensor)
         func_tensor_mxn(a, w, b_tensor_mxn)
+        func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
         np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
         np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
-        # np.testing.assert_allclose(b_tensor.asnumpy(), b_np, rtol=1e-5)
+        np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
         np.testing.assert_allclose(b_tensor_mxn.asnumpy(), b_np, rtol=1e-5)
-        (_, _, out_size, _)= get_const_tuple(B.shape)
+
+        (_, _, out_size, _) = get_const_tuple(B.shape)
         FLOPS = 2 * batch * in_channel * out_size * out_size * kernel * kernel * num_filter
         REPEAT = 20
 
@@ -350,8 +514,9 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         evaluator_nchw = func_nchw.time_evaluator(func_nchw.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw).mean
         # evaluator_tensor = func_tensor.time_evaluator(func_tensor.entry_name, ctx, number=REPEAT)
         evaluator_tensor_mxn = func_tensor_mxn.time_evaluator(func_tensor_mxn.entry_name, ctx, number=REPEAT)(a, w, b_tensor_mxn).mean
+        evaluator_nchw_tensor_mxn = func_nchw_tensor_mxn.time_evaluator(func_nchw_tensor_mxn.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw_tensor_mxn).mean
 
-        print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}".format(gflops(evaluator), gflops(evaluator_nchw), gflops(evaluator_tensor_mxn)))
+        print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), gflops(evaluator_nchw), gflops(evaluator_tensor_mxn), gflops(evaluator_nchw_tensor_mxn)))
         return evaluator_nchw / evaluator_tensor_mxn
     return check_device(target)
 
@@ -396,12 +561,13 @@ def test_conv2d_nhwc():
     ]
 
     MOBILENET = [
+        Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
+
         Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
 
         Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
 
         # Workload('float32', 'float32', 224, 224, 3, 32, 3, 3, 1, 1, 2, 2),
-        Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 1, 1),

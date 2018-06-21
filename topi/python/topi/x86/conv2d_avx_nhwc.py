@@ -126,8 +126,8 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         return (a + b - 1) // b * b
 
 
-    tile_in_c = CIn * KH * KW > KTile
-    K = CIn * KH * KW if not tile_in_c else round_up(CIn * KH * KW, KTile)
+    tile_in_k = CIn * KH * KW >= 2 * KTile
+    K = CIn * KH * KW if not tile_in_k else round_up(CIn * KH * KW, KTile)
 
     # [N * H * W // TILE, KH * KW * C, TILE]
     A_tile_shape = (div_round_up(N * OH * OW, MTile), K, MTile)
@@ -144,7 +144,7 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         conds = []
         if N * OH * OW % MTile != 0:
             conds += [spatial_idx < N * OH * OW]
-        if tile_in_c and CIn * KH * KW % KTile != 0:
+        if tile_in_k and CIn * KH * KW % KTile != 0:
             conds += [channel_idx < CIn * KH * KW]
 
         return tvm.select(tvm.all(*conds), A[n, h_in, w_in, c_in], 0.0) if conds else A[n, h_in, w_in, c_in]
@@ -161,7 +161,7 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         conds = []
         if COut % NTile != 0:
             conds += [c_out < COut]
-        if tile_in_c and CIn * KH * KW % KTile != 0:
+        if tile_in_k and CIn * KH * KW % KTile != 0:
             conds += [channel_idx < CIn * KH * KW]
 
         return tvm.select(tvm.all(*conds), W_[c_kh, c_kw, c_in, c_out], 0.0) if conds else W_[c_kh, c_kw, c_in, c_out]
@@ -248,7 +248,7 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile * NTileUnroll)
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
             yii, yiii = s[A_W_product].split(yi, factor=NTile)
-            tile_in_k = K > KTile and MTileUnroll > 1
+            tile_in_k = K >= 2 * KTile and MTileUnroll > 1
             if tile_in_k:
                 k, = A_W_product.op.reduce_axis
                 ko, ki = s[A_W_product].split(k, factor=KTile)

@@ -45,7 +45,7 @@ import timeit
 # (M, K) x (K, N)
 # You are free to try out different shapes, sometimes TVM optimization outperforms numpy with MKL.
 M = 768
-K = 128
+K = 1024
 N = 288
 FLOPS = 2 * M * N * K
 # The default tensor type in tvm
@@ -61,7 +61,7 @@ print("asdf")
 a = tvm.nd.array(numpy.random.rand(M, K).astype(dtype), ctx)
 b = tvm.nd.array(numpy.random.rand(K, N).astype(dtype), ctx)
 
-REPEAT = 100
+REPEAT = 400
 np_runing_time = timeit.timeit(setup='import numpy\n'
                                      'M = ' + str(M) + '\n'
                                      'K = ' + str(K) + '\n'
@@ -410,31 +410,86 @@ def intrin_gemm(M, N, K):
                         offset_factor=1,
                         strides=[tvm.var('ldc'), 1])
 
+MTile = 4
+NTile = 24
+KTile = 256
+
+# Tensorized
+def intrin_gemm(M, N, K):
+    assert M == MTile
+    assert N == NTile
+    dtype = 'float32'
+    A = tvm.placeholder((K, M), dtype=dtype, name='A')
+    B = tvm.placeholder((K, N), dtype=dtype, name='B')
+    k = tvm.reduce_axis((0, K), name='k')
+    C = tvm.compute((M, N), lambda m, n:
+                    tvm.sum(A[k, m] * B[k, n], axis=[k]), name='C')
+
+    Ab = tvm.decl_buffer(A.shape, A.dtype,
+                        name="A",
+                        offset_factor=MTile,
+                        strides=[M, 1])
+    Bb = tvm.decl_buffer(B.shape, B.dtype,
+                        name="B",
+                        offset_factor=NTile,
+                        strides=[N, 1])
+    Cb = tvm.decl_buffer(C.shape, C.dtype,
+                        name="C",
+                        offset_factor=1,
+                        strides=[tvm.var('ldc'), 1])
+
     def intrin_func(ins, outs):
         aa, bb = ins
         cc = outs[0]
-        irb = tvm.ir_builder.create()
-        extern_call = tvm.call_extern(
-            "int32",
-            "sgemm_only_4x24__avx2",
-            K,
-            irb.buffer_ptr(aa),
-            aa.elem_offset,
-            irb.buffer_ptr(bb),
-            bb.elem_offset,
-            irb.buffer_ptr(cc),
-            cc.elem_offset,
-            cc.strides[0])
-        irb.emit(extern_call)
-        return irb.get()
+
+        def body():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "sgemm_compute_4x24__avx2",
+                K,
+                irb.buffer_ptr(aa),
+                aa.elem_offset,
+                irb.buffer_ptr(bb),
+                bb.elem_offset,
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+
+        def reset():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "sgemm_reset_4x24__avx2",
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+
+        def update():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "sgemm_update_4x24__avx2",
+                K,
+                irb.buffer_ptr(aa),
+                aa.elem_offset,
+                irb.buffer_ptr(bb),
+                bb.elem_offset,
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+        return body(), reset(), update()
 
     with tvm.build_config():
         return tvm.decl_tensor_intrin(C.op,
                                       intrin_func,
                                       binds={A: Ab, B: Bb, C: Cb})
-
-MTile = 4
-NTile = 24
 
 assert M % MTile == 0
 assert N % NTile == 0
@@ -456,14 +511,39 @@ C = tvm.compute(
 print("C", C.shape, M, N)
 s = tvm.create_schedule(C.op)
 x, y, z = BPanel.op.axis
-# s[BPanel].vectorize(z)
+s[BPanel].vectorize(z)
 x, y, z = APanel.op.axis
 s[APanel].unroll(z)
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, NTile)
-s[C].reorder(xo, yo, xi, yi)
+
+MTileUnroll = 1
+for i in range(24, 0, -1):
+    if M % (MTile * i) == 0:
+        MTileUnroll = i
+        break
+NTileUnroll = 1
+for i in range(6, 0, -1):
+    if N % (NTile * i) == 0:
+        NTileUnroll = i
+        break
+
+xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], MTile * MTileUnroll, NTile * NTileUnroll)
 xii, xiii = s[C].split(xi, factor=MTile)
-gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
-s[C].tensorize(xiii, gemm_intrinsic_function)
+yii, yiii = s[C].split(yi, factor=NTile)
+tile_in_k = K >= 2 * KTile and MTileUnroll > 1
+if tile_in_k:
+    k, = C.op.reduce_axis
+    ko, ki = s[C].split(k, factor=KTile)
+    s[C].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
+    # s[A_tile].compute_at(s[A_W_product], xo)
+    # s[W_tile].compute_at(s[A_W_product], ko)
+else:
+    s[C].reorder(yo, xo, yii, xii, xiii, yiii)
+s[C].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile if tile_in_k else K))
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, NTile)
+# s[C].reorder(xo, yo, xi, yi)
+# xii, xiii = s[C].split(xi, factor=MTile)
+# gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
+# s[C].tensorize(xiii, gemm_intrinsic_function)
 
 print(tvm.lower(s, [A, B, C], simple_mode=True))
 func = tvm.build(s, [A, B, C], target=target)
@@ -493,7 +573,7 @@ D = tvm.compute((M, N), lambda m, n: tvm.max(C[m, n], 0), name="D")
 
 s = tvm.create_schedule(D.op)
 x, y, z = BPanel.op.axis
-# s[BPanel].vectorize(z)
+s[BPanel].vectorize(z)
 x, y, z = APanel.op.axis
 s[APanel].unroll(z)
 
@@ -503,12 +583,45 @@ s[APanel].unroll(z)
 # gemm_intrinsic_function = intrin_gemm(M=MTile, N=NTile, K=K)
 # s[C].tensorize(xiii, gemm_intrinsic_function)
 
-xo, yo, xi, yi = s[D].tile(D.op.axis[0], D.op.axis[1], bn, NTile)
-s[D].reorder(xo, yo, xi, yi)
-xii, xiii = s[D].split(xi, factor=MTile)
-s[C].compute_at(s[D], xii)
-xii, xiii = s[C].split(C.op.axis[0], factor=MTile)
-s[C].tensorize(xiii, gemm_intrinsic_function)
+MTileUnroll = 1
+for i in range(24, 0, -1):
+    if M % (MTile * i) == 0:
+        MTileUnroll = i
+        break
+NTileUnroll = 1
+for i in range(6, 0, -1):
+    if N % (NTile * i) == 0:
+        NTileUnroll = i
+        break
+
+xo, yo, xi, yi = s[D].tile(D.op.axis[0], D.op.axis[1], MTile * MTileUnroll, NTile * NTileUnroll)
+
+s[D].reorder(yo, xo, yi, xi)
+s[D].vectorize(yi)
+tile_in_k = K >= 2 * KTile and MTileUnroll > 1
+
+s[C].compute_at(s[D], xo)
+
+k, = s[C].op.reduce_axis
+xii, xiii = s[C].split(s[C].op.axis[0], factor=MTile)
+yii, yiii = s[C].split(s[C].op.axis[1], factor=NTile)
+if tile_in_k:
+    ko, ki = s[C].split(k, factor=KTile)
+    s[C].reorder(ko, yii, xii, xiii, yiii, ki)
+    s[C].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile))
+else:
+    s[C].reorder(yii, xii, xiii, yiii)
+    s[C].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=K))
+
+
+
+
+# xo, yo, xi, yi = s[D].tile(D.op.axis[0], D.op.axis[1], bn, NTile)
+# s[D].reorder(xo, yo, xi, yi)
+# xii, xiii = s[D].split(xi, factor=MTile)
+# s[C].compute_at(s[D], xii)
+# xii, xiii = s[C].split(C.op.axis[0], factor=MTile)
+# s[C].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=K))
 
 
 (x, y) = C.op.axis

@@ -22,9 +22,14 @@ def bitcode_paths():
     return BITCODE_PATHS
 
 
+# We want to keep B micro-panel in cache.
+# so MTile * KTile + NTile * MTile + KTile * NTile elements should fit in L1.
+# Therefore, KTile = 256
+
 MTile = 4
 MMTile = 4
 NTile = 24
+KTile = 256
 
 # Tensorized
 def intrin_gemm(M, N, K):
@@ -111,7 +116,6 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
     # assert stride == 1, stride
     assert padding == 0
 
-
     OH = (IH + 2*padding - KH) // stride + 1
     OW = (IW + 2*padding - KW) // stride + 1
 
@@ -121,10 +125,12 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
     def round_up(a, b):
         return (a + b - 1) // b * b
 
-    # We need A_tile_shape to divide MMTile, not MTile.
+
+    tile_in_c = CIn * KH * KW > KTile
+    K = CIn * KH * KW if not tile_in_c else round_up(CIn * KH * KW, KTile)
 
     # [N * H * W // TILE, KH * KW * C, TILE]
-    A_tile_shape = (div_round_up(N * OH * OW, MTile), CIn * KH * KW, MTile)
+    A_tile_shape = (div_round_up(N * OH * OW, MTile), K, MTile)
 
     def _A_tile(tile_idx, channel_idx, tile_elem):
         spatial_idx = tile_elem + tile_idx * MTile
@@ -135,25 +141,34 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         c_kh = channel_idx // CIn // KW
         h_in = spatial_idx // OW % OH*stride + c_kh
         w_in = spatial_idx % OW*stride + c_kw
-        return tvm.select(
-            spatial_idx < N * OH * OW, #tvm.all(n < N, h_in < IH, w_in < IW),
-            A[n, h_in, w_in, c_in],
-            0.0)
+        conds = []
+        if N * OH * OW % MTile != 0:
+            conds += [spatial_idx < N * OH * OW]
+        if tile_in_c and CIn * KH * KW % KTile != 0:
+            conds += [channel_idx < CIn * KH * KW]
+
+        return tvm.select(tvm.all(*conds), A[n, h_in, w_in, c_in], 0.0) if conds else A[n, h_in, w_in, c_in]
 
     A_tile = tvm.compute(A_tile_shape, _A_tile, name="A_tile")
 
-    W_tile_shape = (div_round_up(COut, NTile), CIn * KH * KW, NTile)
+    W_tile_shape = (div_round_up(COut, NTile), K, NTile)
 
     def _W_tile(tile_idx, channel_idx, tile_elem):
         c_out = tile_elem + tile_idx * NTile
         c_in = channel_idx % CIn
         c_kw = channel_idx // CIn % KW
         c_kh = channel_idx // CIn // KW
-        return tvm.select(c_out < COut, W_[c_kh, c_kw, c_in, c_out], 0.0)
+        conds = []
+        if COut % NTile != 0:
+            conds += [c_out < COut]
+        if tile_in_c and CIn * KH * KW % KTile != 0:
+            conds += [channel_idx < CIn * KH * KW]
+
+        return tvm.select(tvm.all(*conds), W_[c_kh, c_kw, c_in, c_out], 0.0) if conds else W_[c_kh, c_kw, c_in, c_out]
 
     W_tile = tvm.compute(W_tile_shape, _W_tile, name="W_tile")
 
-    k = tvm.reduce_axis((0, CIn * KH * KW), name='k')
+    k = tvm.reduce_axis((0, K), name='k')
 
     A_W_product = tvm.compute(
         (A_tile_shape[0] * MTile, W_tile_shape[0] * NTile),
@@ -163,6 +178,7 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         name='A_W_product')
 
     output_shape = (N, OH, OW, COut)
+
     def _unpack_output(n, h, w, c):
         m_idx = w + h * OW + n * OH * OW
         return A_W_product[m_idx, c] + tvm.const(0, A_W_product.dtype) * A_W_product[A_W_product.shape[0] - 1, A_W_product.shape[1] - 1]
@@ -199,29 +215,52 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             A_W_product = op.input_tensors[0]
             A_tile = A_W_product.op.input_tensors[0]
             x, y, z = A_tile.op.axis
-            s[A_tile].unroll(z)
+            zo, zi = s[A_tile].split(z, 8)
+            s[A_tile].reorder(x, zo, y, zi)
+            # s[A_tile].vectorize(zi)
+            # s[A_tile].unroll(z)
             # s[A_tile].reorder(x, z, y)
-            # s[A_tile].vectorize(y)
+
             # xo, xi = s[A_tile].split(x, factor=4)
             # s[A_tile].reorder(xo, y, xi, z)
+
             W_tile = A_W_product.op.input_tensors[1]
             x, y, z = W_tile.op.axis
-            # s[W_tile].reorder(x, z, y)
-            s[W_tile].unroll(z)
+            # s[W_tile].unroll(z)
+            zo, zi = s[W_tile].split(z, 8)
+            s[W_tile].reorder(x, zo, y, zi)
+            s[W_tile].vectorize(zi)
             M = get_const_int(A_W_product.op.axis[0].dom.extent)
+            N = get_const_int(A_W_product.op.axis[1].dom.extent)
             assert M % MTile == 0
             MTileUnroll = 1
-            for i in range(8, 0, -1):
+            for i in range(24, 0, -1):
                 if M % (MTile * i) == 0:
                     MTileUnroll = i
                     break
+            NTileUnroll = 1
+            for i in range(6, 0, -1):
+                if N % (NTile * i) == 0:
+                    NTileUnroll = i
+                    break
 
-            xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile)
-            s[A_W_product].reorder(xo, yo, xi, yi)
-            # s[A_tile].compute_at(s[A_W_product], xo)
+            K = get_const_int(A_W_product.op.reduce_axis[0].dom.extent)
+            xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile * NTileUnroll)
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
-            k, = s[A_W_product].op.reduce_axis
-            s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=get_const_int(k.dom.extent)))
+            yii, yiii = s[A_W_product].split(yi, factor=NTile)
+
+            print("MTileUnroll: {}, NTileUnroll: {}".format(MTileUnroll, NTileUnroll))
+            tile_in_k = K > KTile and MTileUnroll > 1
+            if tile_in_k:
+                k, = A_W_product.op.reduce_axis
+                ko, ki = s[A_W_product].split(k, factor=KTile)
+                s[A_W_product].reorder(xo, yo, ko, yii, xii, xiii, yiii, ki)
+                # s[A_tile].compute_at(s[A_W_product], xo)
+                # s[W_tile].compute_at(s[A_W_product], ko)
+            else:
+                s[A_W_product].reorder(xo, yo, yii, xii, xiii, yiii)
+
+            s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile if tile_in_k else K))
             # s[A_W_product].unroll(xii)
             n, h, w, c = op.axis
             fused = s[op].fuse(n, h, w)
@@ -321,24 +360,6 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
 
 def test_conv2d_nhwc():
-        # ResNet18 worklaods
-    # speedups = [
-    #     verify_conv2d_nhwc(1, 3, 224, 64, 7, 2, 3),
-    #     verify_conv2d_nhwc(1, 64, 56, 64, 3, 1, 1),
-    #     verify_conv2d_nhwc(1, 64, 56, 64, 1, 1, 0),
-    #     verify_conv2d_nhwc(1, 64, 56, 128, 3, 2, 1),
-    #     verify_conv2d_nhwc(1, 64, 56, 128, 1, 2, 0),
-    #     verify_conv2d_nhwc(1, 128, 28, 128, 3, 1, 1),
-    #     verify_conv2d_nhwc(1, 128, 28, 256, 3, 2, 1),
-    #     verify_conv2d_nhwc(1, 128, 28, 256, 1, 2, 0),
-    #     verify_conv2d_nhwc(1, 256, 14, 256, 3, 1, 1),
-    #     verify_conv2d_nhwc(1, 256, 14, 512, 3, 2, 1),
-    #     verify_conv2d_nhwc(1, 256, 14, 512, 1, 2, 0),
-    #     verify_conv2d_nhwc(1, 512, 7, 512, 3, 1, 1),
-    # ]
-    # import scipy.stats.mstats
-    # print("RESNET-18 GEOMEAN: {:.2f}".format(scipy.stats.mstats.gmean(speedups)))
-
     Workload = collections.namedtuple(
         'Workload',
         ['in_dtype', 'out_dtype', 'height', 'width', 'in_filter', 'out_filter',
@@ -377,7 +398,11 @@ def test_conv2d_nhwc():
     ]
 
     MOBILENET = [
-        Workload('float32', 'float32', 224, 224, 3, 32, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
+
+        Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
+
+        # Workload('float32', 'float32', 224, 224, 3, 32, 3, 3, 1, 1, 2, 2),
         Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
@@ -385,51 +410,15 @@ def test_conv2d_nhwc():
         Workload('float32', 'float32', 28, 28, 256, 256, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 14, 14, 512, 512, 1, 1, 0, 0, 1, 1),
-        Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
-        Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
     ]
 
     def run(workload, name):
         speedups = [verify_conv2d_nhwc(1, w.in_filter, w.height, w.out_filter, w.hkernel, w.hstride, w.hpad, 1) for w in workload]
         print("{}: {:.2f}".format(name, scipy.stats.mstats.gmean(speedups)))
 
-    run(RESNET_18, "RESNET-18")
     run(MOBILENET, "MOBILENET")
+    run(RESNET_18, "RESNET-18")
     run(RESNET_50, "RESNET-50")
-
-    # speedups = [
-    #     verify_conv2d_nhwc(1, 64, 256, 56, 1, 1, 0),
-    #     verify_conv2d_nhwc(1, 256, 64, 56, 1, 1, 0),
-
-    #     verify_conv2d_nhwc(1, 256, 128, 56, 1, 2, 0),
-    #     verify_conv2d_nhwc(1, 128, 512, 28, 1, 1, 0),
-
-    #     verify_conv2d_nhwc(1, 256, 512, 56, 1, 2, 0),
-    #     verify_conv2d_nhwc(1, 512, 256, 28, 1, 2, 0),
-
-    # ]
-    # print("RESNET-50 GEOMEAN: {:.2f}".format(scipy.stats.mstats.gmean(speedups)))
-
-    # # Vgg16 workloads
-    # verify_conv2d_nhwc(1, 128, 122, 128, 3, 1, 1)
-    # # Super resolution workloads
-    # verify_conv2d_nhwc(1, 1, 224, 64, 5, 1, 2)
-    # verify_conv2d_nhwc(1, 64, 224, 64, 3, 1, 1)
-    # verify_conv2d_nhwc(1, 64, 224, 32, 3, 1, 1)
-    # verify_conv2d_nhwc(1, 32, 224, 9, 3, 1, 1)
-    # # dilation = 2
-    # verify_conv2d_nhwc(1, 128, 122, 128, 3, 1, 1, dilation=2)
-
-    # verify_conv2d_nhwc(1, 256, 32, 128, 3, 1, "SAME")
-    # verify_conv2d_nhwc(1, 128, 16, 128, 5, 2, "SAME")
-    # verify_conv2d_nhwc(1, 128, 16, 256, 5, 2, "SAME")
-    # verify_conv2d_nhwc(1, 64, 16, 256, 5, 2, "SAME")
-    # verify_conv2d_nhwc(1, 256, 32, 256, 3, 1, "VALID")
-    # verify_conv2d_nhwc(1, 256, 32, 256, 3, 1, "VALID")
-    # verify_conv2d_nhwc(1, 128, 16, 128, 5, 2, "VALID")
-    # verify_conv2d_nhwc(1, 128, 16, 256, 5, 2, "VALID")
-    # # dilation = 2
-    # verify_conv2d_nhwc(1, 256, 32, 256, 3, 1, "SAME", dilation=2)
 
 
 if __name__ == "__main__":

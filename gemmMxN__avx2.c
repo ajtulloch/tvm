@@ -73,6 +73,13 @@ void sgemm_reset_4x24__avx2(float *c, int32_t c_off, int32_t ldc) {
   c = c + c_off;
   size_t ldc_size_t = ldc;
   asm volatile("shl    $0x2,%[ldc_size_t]\n\t"
+               "prefetcht0 (%[c])\n\t"
+               "add    %[ldc_size_t],%[c]\n\t"
+               "prefetcht0 (%[c])\n\t"
+               "add    %[ldc_size_t],%[c]\n\t"
+               "prefetcht0 (%[c])\n\t"
+               "add    %[ldc_size_t],%[c]\n\t"
+               "prefetcht0 (%[c])\n\t"
                "vzeroall\n\t"
                "vmovups %%ymm6,(%[c])\n\t"
                "vmovups %%ymm5,0x20(%[c])\n\t"

@@ -11,7 +11,7 @@ from ..nn.util import infer_pad, infer_stride
 from ..nn.pad import pad
 
 AVXConv1x1Fwd = namedtuple('AVXConv1x1Fwd', ['ic_bn', 'oc_bn', 'oh_factor', 'ow_factor'])
-USE_TENSOR = False
+USE_TENSOR = True
 
 OPS_TO_GEMM = {}
 
@@ -252,6 +252,7 @@ def _schedule_conv_tensor(s, op):
 
             xo, yo, xi, yi = s[A_W_product].tile(A_W_product.op.axis[0], A_W_product.op.axis[1], MTile * MTileUnroll, NTile)
             s[A_W_product].reorder(xo, yo, xi, yi)
+            # s[A_tile].compute_at(s[A_W_product], xo)
             # s[A_W_product].compute_root()
             xii, xiii = s[A_W_product].split(xi, factor=MTile)
             k, = s[A_W_product].op.reduce_axis

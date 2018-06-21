@@ -230,6 +230,7 @@ def verify_conv2d_nchw(batch, in_channel, in_size, num_filter, kernel, stride, p
             print("Baseline", tvm.lower(s_baseline, [A, W, B], simple_mode=True))
 
             print(tvm.lower(s1, [A, W, B], simple_mode=True))
+            print(tvm.lower(s_baseline, [A, W, B_baseline], simple_mode=True))
 
         a = tvm.nd.array(a_np, ctx)
         w = tvm.nd.array(w_np, ctx)

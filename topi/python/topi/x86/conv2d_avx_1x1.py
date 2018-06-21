@@ -11,7 +11,7 @@ from ..nn.util import infer_pad, infer_stride
 from ..nn.pad import pad
 
 AVXConv1x1Fwd = namedtuple('AVXConv1x1Fwd', ['ic_bn', 'oc_bn', 'oh_factor', 'ow_factor'])
-USE_TENSOR = True
+USE_TENSOR = False
 
 OPS_TO_GEMM = {}
 

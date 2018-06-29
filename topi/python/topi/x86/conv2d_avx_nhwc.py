@@ -6,6 +6,8 @@ import topi
 import topi.testing
 from tvm.contrib.pickle_memoize import memoize
 from topi.util import get_const_tuple, get_const_int
+from topi.nn.pad import pad
+
 from topi import tag
 import scipy.stats.mstats
 import collections
@@ -114,7 +116,7 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
     (KH, KW, CIn_, COut) = get_const_tuple(W_.shape)
     assert CIn == CIn_
     # assert stride == 1, stride
-    assert padding == 0
+    # assert padding == 0
 
     OH = (IH + 2*padding - KH) // stride + 1
     OW = (IW + 2*padding - KW) // stride + 1
@@ -139,11 +141,20 @@ def conv2d_nhwc_tensor_mxn(A, W_, stride, padding):
         c_in = channel_idx % CIn
         c_kw = channel_idx // CIn % KW
         c_kh = channel_idx // CIn // KW
-        h_in = spatial_idx // OW % OH*stride + c_kh
-        w_in = spatial_idx % OW*stride + c_kw
+        h_in = spatial_idx // OW % OH * stride + c_kh - padding
+        w_in = spatial_idx % OW * stride + c_kw - padding
         conds = []
-        if N * OH * OW % MTile != 0:
-            conds += [spatial_idx < N * OH * OW]
+        if padding != 0 or N * OH * OW % MTile != 0:
+            conds += [
+                n < N,
+                0 <= h_in,
+                h_in < IH,
+                0 <= w_in,
+                w_in < IW,
+            ]
+
+        # if padding != 0 or N * OH * OW % MTile != 0:
+        #     conds += [n < N, h_in >= 0, h_in < IH, w_in >= 0, w_in < IW]
         if tile_in_k and CIn * KH * KW % KTile != 0:
             conds += [channel_idx < CIn * KH * KW]
 
@@ -196,8 +207,6 @@ def conv2d_nchw_tensor_mxn(A, W_, stride, padding):
     (N, CIn, IH, IW) = get_const_tuple(A.shape)
     (COut, CIn_, KH, KW) = get_const_tuple(W_.shape)
     assert CIn == CIn_
-    # assert stride == 1, stride
-    assert padding == 0
 
     OH = (IH + 2*padding - KH) // stride + 1
     OW = (IW + 2*padding - KW) // stride + 1
@@ -208,6 +217,8 @@ def conv2d_nchw_tensor_mxn(A, W_, stride, padding):
     def round_up(a, b):
         return (a + b - 1) // b * b
 
+    if padding > 0:
+        A = pad(A, (0, 0, padding, padding), name="A_pad")
 
     tile_in_k = CIn * KH * KW >= 2 * KTile
     K = CIn * KH * KW if not tile_in_k else round_up(CIn * KH * KW, KTile)
@@ -222,15 +233,21 @@ def conv2d_nchw_tensor_mxn(A, W_, stride, padding):
         c_in = channel_idx % CIn
         c_kw = channel_idx // CIn % KW
         c_kh = channel_idx // CIn // KW
-        h_in = spatial_idx // OW % OH*stride + c_kh
-        w_in = spatial_idx % OW*stride + c_kw
+        h_in = spatial_idx // OW % OH * stride + c_kh
+        w_in = spatial_idx % OW * stride + c_kw
         conds = []
-        if N * OH * OW % MTile != 0:
+
+        if padding != 0 or N * OH * OW % MTile != 0:
             conds += [spatial_idx < N * OH * OW]
+
         if tile_in_k and CIn * KH * KW % KTile != 0:
             conds += [channel_idx < CIn * KH * KW]
 
-        return tvm.select(tvm.all(*conds), A[n, c_in, h_in, w_in], 0.0) if conds else A[n, c_in, h_in, w_in]
+        return tvm.select(
+            tvm.all(*conds),
+            A[n, c_in, h_in, w_in],
+            0.0
+        ) if conds else A[n, c_in, h_in, w_in]
 
     A_tile = tvm.compute(A_tile_shape, _A_tile, name="A_tile")
 
@@ -301,7 +318,7 @@ def schedule_conv2d_nhwc_tensor_mxn(outs):
             # zo, zi = s[A_tile].split(z, 8)
             # s[A_tile].reorder(x, zo, y, zi)
             # s[A_tile].vectorize(zi)
-            # s[A_tile].unroll(z)
+            s[A_tile].unroll(z)
             # s[A_tile].reorder(x, z, y)
 
             # xo, xi = s[A_tile].split(x, factor=4)
@@ -434,7 +451,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
     in_height = in_width = in_size
     # kernel = 1
     # stride = 1
-    padding = 0
+    # padding = 0
     dilation = 1
     A = tvm.placeholder((batch, in_height, in_width, in_channel), name='A')
     W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W')
@@ -506,7 +523,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
         (_, _, out_size, _) = get_const_tuple(B.shape)
         FLOPS = 2 * batch * in_channel * out_size * out_size * kernel * kernel * num_filter
-        REPEAT = 20
+        REPEAT = 50
 
         def gflops(t):
             return FLOPS / t / 1E9
@@ -517,7 +534,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         evaluator_nchw_tensor_mxn = func_nchw_tensor_mxn.time_evaluator(func_nchw_tensor_mxn.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw_tensor_mxn).mean
 
         print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), gflops(evaluator_nchw), gflops(evaluator_tensor_mxn), gflops(evaluator_nchw_tensor_mxn)))
-        return evaluator_nchw / evaluator_tensor_mxn
+        return evaluator_nchw / evaluator_nchw_tensor_mxn
     return check_device(target)
 
 
@@ -580,8 +597,8 @@ def test_conv2d_nhwc():
         speedups = [verify_conv2d_nhwc(1, w.in_filter, w.height, w.out_filter, w.hkernel, w.hstride, w.hpad, 1) for w in workload]
         print("{}: {:.2f}".format(name, scipy.stats.mstats.gmean(speedups)))
 
-    run(MOBILENET, "MOBILENET")
     run(RESNET_18, "RESNET-18")
+    run(MOBILENET, "MOBILENET")
     run(RESNET_50, "RESNET-50")
 
 

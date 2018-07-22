@@ -163,6 +163,29 @@ class LLVMModuleNode final : public runtime::ModuleNode {
     std::unique_ptr<CodeGenLLVM> cg = CodeGenLLVM::Create(tm_);
     entry_func_ = funcs[0]->name;
     cg->Init(funcs[0]->name, tm_, ctx_.get(), system_lib, system_lib);
+
+    Array<Expr> bitcode_files;
+    if (const auto *llvm_bitcode_paths =
+            tvm::runtime::Registry::Get("tvm_callback_llvm_bitcode_path")) {
+      bitcode_files = (*llvm_bitcode_paths)();
+    }
+    for (auto &bitcode : bitcode_files) {
+      std::string path = bitcode.as<StringImm>()->value;
+      llvm::SMDiagnostic err;
+      std::unique_ptr<llvm::Module> mlib = llvm::parseIRFile(path, err, *ctx_);
+      if (mlib.get() == nullptr) {
+        std::string msg = err.getMessage();
+        LOG(FATAL) << "Fail to load bitcode file " << path << "\n"
+                   << "line " << err.getLineNo() << ":" << msg;
+      }
+      mlib->setTargetTriple(tm_->getTargetTriple().str());
+      mlib->setDataLayout(tm_->createDataLayout());
+      for (llvm::Function &f : mlib->functions()) {
+        f.addFnAttr(llvm::Attribute::AlwaysInline);
+      }
+      cg->AddLinkModule(std::move(mlib));
+    }
+
     for (LoweredFunc f :  funcs) {
       cg->AddFunction(f);
     }

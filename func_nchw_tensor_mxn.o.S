@@ -61,7 +61,7 @@ default_function:
 	tst	r0, #1
 	beq	.LBB0_5
 	ldr	r0, [r1, #8]
-	cmp	r0, #196
+	cmp	r0, #49
 	ldreq	r0, [r1]
 	cmpeq	r0, #100352
 	beq	.LBB0_6
@@ -97,7 +97,7 @@ default_function:
 	ldr	r0, [r2, #8]
 	cmp	r0, #1
 	ldreq	r0, [r2]
-	cmpeq	r0, #512
+	cmpeq	r0, #2048
 	beq	.LBB0_11
 .LBB0_10:
 	ldr	r0, .LCPI0_63
@@ -126,9 +126,9 @@ default_function:
 	tst	r0, #1
 	beq	.LBB0_15
 	ldr	r0, [r11, #8]
-	cmp	r0, #196
+	cmp	r0, #49
 	ldreq	r0, [r11]
-	cmpeq	r0, #100352
+	cmpeq	r0, #25088
 	beq	.LBB0_16
 .LBB0_15:
 	ldr	r0, .LCPI0_65
@@ -186,13 +186,13 @@ default_function:
 	cmp	r0, #1
 	bne	.LBB0_63
 	ldr	r0, [r7, #8]
-	cmp	r0, #512
+	cmp	r0, #2048
 	bne	.LBB0_64
 	ldr	r0, [r7, #16]
-	cmp	r0, #14
+	cmp	r0, #7
 	bne	.LBB0_65
 	ldr	r0, [r7, #24]
-	cmp	r0, #14
+	cmp	r0, #7
 	bne	.LBB0_66
 	ldrd	r0, r1, [r6, #32]
 	orrs	r0, r0, r1
@@ -249,7 +249,7 @@ default_function:
 	cmp	r0, #512
 	bne	.LBB0_69
 	ldr	r0, [r10, #8]
-	cmp	r0, #512
+	cmp	r0, #2048
 	bne	.LBB0_70
 	ldr	r0, [r10, #16]
 	cmp	r0, #1
@@ -299,10 +299,10 @@ default_function:
 	cmp	r0, #512
 	bne	.LBB0_78
 	ldr	r0, [r8, #16]
-	cmp	r0, #14
+	cmp	r0, #7
 	bne	.LBB0_79
 	ldr	r0, [r8, #24]
-	cmp	r0, #14
+	cmp	r0, #7
 	bne	.LBB0_80
 	ldrd	r0, r1, [r12, #32]
 	orrs	r0, r0, r1
@@ -348,7 +348,7 @@ default_function:
 	b	.LBB0_49
 	.p2align	3
 .LCPI0_67:
-	.long	14
+	.long	7
 	.long	1
 .LBB0_63:
 	ldr	r0, .LCPI0_15
@@ -709,7 +709,7 @@ default_function:
 	.size	default_function, .Lfunc_end0-default_function
 	.fnend
 
-	.p2align	3
+	.p2align	2
 	.type	.Ldefault_function_compute_,%function
 	.code	32
 .Ldefault_function_compute_:
@@ -720,179 +720,252 @@ default_function:
 	sub	sp, sp, #4
 	.vsave	{d8, d9, d10, d11, d12, d13, d14, d15}
 	vpush	{d8, d9, d10, d11, d12, d13, d14, d15}
-	.pad	#168
-	sub	sp, sp, #168
-	str	r2, [sp, #12]
+	.pad	#72
+	sub	sp, sp, #72
+	str	r2, [sp, #8]
 	mov	r7, r3
 	mov	r4, r0
 	mov	r0, #32
 	mov	r9, r1
 	mov	r10, #2
-	mov	r2, #405504
+	mov	r2, #442368
 	mov	r3, #0
-	mov	r5, #0
-	ldr	r8, .LCPI1_3
+	mov	r8, #0
+	ldr	r11, .LCPI1_2
 	mov	r1, r7
 .LPC1_0:
-	ldr	r8, [pc, r8]
-	ldr	r6, [r8]
+	ldr	r11, [pc, r11]
+	ldr	r6, [r11]
 	str	r0, [sp, #4]
 	mov	r0, #1
 	str	r10, [sp]
 	blx	r6
-	ldr	r6, [r8]
-	mov	r11, r0
+	ldr	r6, [r11]
+	mov	r5, r0
 	mov	r0, #32
 	mov	r1, r7
-	mov	r2, #1048576
+	mov	r2, #4194304
 	mov	r3, #0
 	str	r10, [sp]
 	str	r0, [sp, #4]
 	mov	r0, #1
 	blx	r6
-	ldr	r6, [r8]
-	str	r0, [sp, #20]
+	ldr	r6, [r11]
+	str	r0, [sp, #16]
 	mov	r0, #32
 	mov	r1, r7
-	mov	r2, #405504
+	mov	r2, #110592
 	mov	r3, #0
 	str	r10, [sp]
 	str	r0, [sp, #4]
 	mov	r0, #1
-	str	r7, [sp, #16]
+	str	r7, [sp, #12]
 	blx	r6
-	vldr	d16, .LCPI1_4
-	add	r8, r4, #8
-	vmov.i32	d17, #0xe
-	vmov.i32	d18, #0xc4
-	mov	r10, r11
+	mov	r10, #5
+	vmov.i32	q8, #0x7
+	vmov.i32	q9, #0x31
+	mov	r11, r5
+	mov	r12, r4
 	mov	lr, #0
-	str	r0, [sp, #164]
-	str	r11, [sp, #84]
+	str	r0, [sp, #40]
+	str	r5, [sp, #32]
 .LBB1_1:
-	cmp	lr, #32
-	bhs	.LBB1_6
-	add	r0, lr, lr, lsl #1
-	lsl	r0, r0, #1
-	vdup.32	d19, r0
-	movw	r0, #9363
-	vadd.i32	d19, d19, d16
-	movt	r0, #37449
-	vmov.32	r6, d19[1]
-	mov	r7, r0
-	lsr	r1, r6, #1
-	umull	r1, r2, r1, r7
-	lsr	r1, r2, #3
-	lsr	r11, r2, #2
-	vmov.32	r2, d19[0]
-	umull	r1, r0, r1, r7
+	cmp	lr, #8
+	bhs	.LBB1_5
+	movw	r7, #18725
+	add	r3, lr, lr, lsl #1
+	mov	r0, #2
+	add	r0, r0, r3, lsl #1
+	movt	r7, #9362
+	umull	r1, r2, r0, r7
+	str	r0, [sp, #60]
+	sub	r1, r0, r2
+	add	r1, r2, r1, lsr #1
+	lsr	r0, r1, #2
+	str	r0, [sp, #52]
+	umull	r2, r0, r0, r7
+	rsb	r2, r0, r1, lsr #2
+	add	r0, r0, r2, lsr #1
+	lsr	r2, r0, #2
+	lsl	r2, r2, #3
+	sub	r0, r2, r0, lsr #2
+	rsb	r0, r0, r1, lsr #2
+	str	r0, [sp, #68]
+	mov	r0, #4
+	add	r2, r0, r3, lsl #1
+	umull	r0, r1, r2, r7
+	str	r2, [sp, #56]
+	sub	r0, r2, r1
+	add	r0, r1, r0, lsr #1
 	lsr	r1, r0, #2
-	lsl	r1, r1, #3
-	sub	r0, r1, r0, lsr #2
-	sub	r3, r11, r0, lsl #1
-	lsr	r0, r2, #1
-	umull	r0, r1, r0, r7
-	lsr	r0, r1, #3
-	lsr	r1, r1, #2
-	umull	r0, r12, r0, r7
-	movw	r7, #33437
-	vmov.32	d20[0], r1
-	lsr	r0, r12, #2
-	movt	r7, #21399
-	vmov.32	d20[1], r11
-	lsl	r0, r0, #3
-	vmls.i32	d19, d20, d17
-	sub	r0, r0, r12, lsr #2
-	sub	r12, r1, r0, lsl #1
-	umull	r1, r0, r6, r7
-	umull	r1, r2, r2, r7
-	lsr	r1, r2, #6
-	vmov.32	d22[0], r12
-	lsr	r0, r0, #6
+	str	r1, [sp, #36]
+	umull	r1, r2, r1, r7
+	rsb	r1, r2, r0, lsr #2
+	add	r1, r2, r1, lsr #1
+	lsr	r2, r1, #2
+	lsl	r2, r2, #3
+	sub	r1, r2, r1, lsr #2
+	rsb	r0, r1, r0, lsr #2
+	str	r0, [sp, #64]
+	mov	r0, #1
+	orr	r2, r0, r3, lsl #1
+	umull	r0, r1, r2, r7
+	sub	r0, r2, r1
+	add	r0, r1, r0, lsr #1
+	lsr	r1, r0, #2
+	str	r1, [sp, #28]
+	umull	r5, r1, r1, r7
+	rsb	r5, r1, r0, lsr #2
+	add	r1, r1, r5, lsr #1
+	lsr	r5, r1, #2
+	lsl	r5, r5, #3
+	sub	r1, r5, r1, lsr #2
+	rsb	r0, r1, r0, lsr #2
+	str	r0, [sp, #48]
+	mov	r0, #3
+	add	r3, r0, r3, lsl #1
+	umull	r0, r1, r3, r7
+	vmov.32	d21[0], r3
+	sub	r0, r3, r1
+	add	r0, r1, r0, lsr #1
+	lsr	r1, r0, #2
+	umull	r5, r6, r1, r7
+	vmov.32	d23[0], r1
+	rsb	r5, r6, r0, lsr #2
+	add	r5, r6, r5, lsr #1
+	lsr	r6, r5, #2
+	lsl	r6, r6, #3
+	sub	r5, r6, r5, lsr #2
+	rsb	r0, r5, r0, lsr #2
+	umull	r1, r5, r10, r7
+	str	r0, [sp, #44]
+	sub	r1, r10, r5
+	ldr	r0, [sp, #36]
+	add	r1, r5, r1, lsr #1
+	lsr	r5, r1, #2
+	umull	r5, r6, r5, r7
+	rsb	r1, r6, r1, lsr #2
+	movw	r5, #33437
+	vmov.32	d23[1], r0
+	ldr	r0, [sp, #28]
+	movt	r5, #21399
+	mov	r7, r5
+	vmov.32	d22[0], r0
+	ldr	r0, [sp, #52]
+	vmov.32	d22[1], r0
+	add	r0, r6, r1, lsr #1
+	umull	r5, r6, r3, r7
+	mov	r3, #0
+	str	r0, [sp, #52]
+	lsr	r5, r6, #4
+	ldr	r1, [sp, #56]
+	vmov.32	d25[0], r5
+	ldr	r0, [sp, #60]
+	umull	r5, r6, r1, r7
+	vmov.32	d21[1], r1
+	lsr	r5, r6, #4
+	vmov.32	d20[0], r2
+	vmov.32	d25[1], r5
+	umull	r5, r6, r2, r7
+	vmov.32	d20[1], r0
+	umull	r1, r2, r10, r7
+	lsr	r5, r6, #4
+	lsr	r1, r2, #4
+	mov	r2, #100352
+	vmls.i32	q10, q11, q8
+	vmov.32	d24[0], r5
+	umull	r5, r6, r0, r7
+	ldr	r0, [sp, #44]
+	mla	r1, r1, r2, r10
+	ldr	r2, [sp, #64]
+	lsr	r5, r6, #4
+	vmov.32	d24[1], r5
+	mov	r5, #0
+	vshl.i32	q11, q12, #11
+	vmov.32	d27[0], r0
+	ldr	r0, [sp, #48]
+	vmov.32	d26[0], r0
+	ldr	r0, [sp, #52]
+	vmov.32	d27[1], r2
+	ldr	r2, [sp, #68]
+	lsr	r0, r0, #2
+	vmov.32	d26[1], r2
+	mov	r2, #49
+	mls	r0, r0, r2, r1
+	vmla.i32	q10, q13, q8
 	mov	r2, #0
-	vmov.32	d21[0], r1
-	vmov.32	d22[1], r3
-	mov	r1, #0
-	vmov.32	d21[1], r0
-	vmla.i32	d19, d22, d17
-	mov	r0, r8
-	vshl.i32	d20, d21, #9
+	add	r1, r4, r0, lsl #2
 .LBB1_3:
-	ldr	r3, [r0, #-8]
-	mov	r6, r10
-	vdup.32	d21, r1
-	vorr	d22, d19, d19
-	add	r1, r1, #1
-	vadd.i32	d21, d21, d20
-	vmla.i32	d22, d21, d18
-	str	r3, [r6, r2]!
-	add	r2, r2, #24
-	ldr	r3, [r0, #-4]
-	cmp	r2, #12288
-	str	r3, [r6, #4]
-	ldr	r3, [r0]
-	str	r3, [r6, #8]
-	ldr	r3, [r0, #4]
-	add	r0, r0, #784
-	str	r3, [r6, #12]
-	vmov.32	r3, d22[0]
-	ldr	r3, [r4, r3, lsl #2]
-	str	r3, [r6, #16]
-	vmov.32	r3, d22[1]
-	ldr	r3, [r4, r3, lsl #2]
-	str	r3, [r6, #20]
+	ldr	r0, [r12, r2]
+	vdup.32	q12, r5
+	vorr	q13, q10, q10
+	mov	r6, r11
+	add	r5, r5, #1
+	vadd.i32	q12, q12, q11
+	vmla.i32	q13, q12, q9
+	str	r0, [r6, r3]!
+	vmov.32	r0, d26[0]
+	add	r3, r3, #24
+	ldr	r0, [r4, r0, lsl #2]
+	cmp	r3, #49152
+	str	r0, [r6, #4]
+	vmov.32	r0, d26[1]
+	ldr	r0, [r4, r0, lsl #2]
+	str	r0, [r6, #8]
+	vmov.32	r0, d27[0]
+	ldr	r0, [r4, r0, lsl #2]
+	str	r0, [r6, #12]
+	vmov.32	r0, d27[1]
+	ldr	r0, [r4, r0, lsl #2]
+	str	r0, [r6, #16]
+	ldr	r0, [r1, r2]
+	add	r2, r2, #196
+	str	r0, [r6, #20]
 	bne	.LBB1_3
-	b	.LBB1_8
+	b	.LBB1_7
 	.p2align	2
-.LCPI1_3:
+.LCPI1_2:
 .Ltmp33:
 	.long	__TVMBackendAllocWorkspace(GOT_PREL)-((.LPC1_0+8)-.Ltmp33)
-	.p2align	3
-.LCPI1_4:
-	.long	4
-	.long	5
+.LBB1_5:
+	mov	r1, #0
+	mov	r2, r12
 .LBB1_6:
-	mov	r0, #0
-	mov	r1, r8
+	ldr	r0, [r2], #196
+	mov	r3, r11
+	str	r0, [r3, r1]!
+	add	r1, r1, #24
+	cmp	r1, #49152
+	str	r8, [r3, #4]
+	str	r8, [r3, #8]
+	str	r8, [r3, #12]
+	str	r8, [r3, #16]
+	str	r8, [r3, #20]
+	bne	.LBB1_6
 .LBB1_7:
-	ldr	r2, [r1, #-8]
-	mov	r3, r10
-	str	r2, [r3, r0]!
-	add	r0, r0, #24
-	ldr	r2, [r1, #-4]
-	cmp	r0, #12288
-	str	r2, [r3, #4]
-	ldr	r2, [r1]
-	str	r2, [r3, #8]
-	ldr	r2, [r1, #4]
-	add	r1, r1, #784
-	str	r5, [r3, #16]
-	str	r5, [r3, #20]
-	str	r2, [r3, #12]
-	bne	.LBB1_7
-.LBB1_8:
 	add	lr, lr, #1
-	add	r10, r10, #12288
-	add	r8, r8, #24
-	cmp	lr, #33
+	add	r10, r10, #6
+	add	r11, r11, #49152
+	add	r12, r12, #24
+	cmp	lr, #9
 	bne	.LBB1_1
-	ldr	lr, [sp, #20]
+	ldr	lr, [sp, #16]
 	mov	r12, #0
-.LBB1_10:
+.LBB1_9:
 	mov	r3, lr
 	mov	r2, #0
-.LBB1_11:
+.LBB1_10:
 	add	r6, r9, r2
 	add	r2, r2, #4
-	add	r1, r6, #14336
+	add	r1, r6, #57344
 	vldr	s0, [r6]
-	add	r8, r6, #8192
-	add	r4, r6, #10240
-	add	r0, r6, #12288
-	add	r7, r6, #2048
-	add	r5, r6, #4096
-	add	r6, r6, #6144
-	cmp	r2, #2048
+	add	r8, r6, #32768
+	add	r4, r6, #40960
+	add	r0, r6, #49152
+	add	r7, r6, #8192
+	add	r5, r6, #16384
+	add	r6, r6, #24576
+	cmp	r2, #8192
 	vldr	s7, [r1]
 	vldr	s3, [r6]
 	vldr	s6, [r0]
@@ -904,250 +977,284 @@ default_function:
 	vst1.32	{d0, d1}, [r3:128]!
 	vst1.64	{d2, d3}, [r3:128]
 	mov	r3, r0
-	bne	.LBB1_11
-	add	r12, r12, #1
-	add	lr, lr, #16384
-	add	r9, r9, #16384
-	cmp	r12, #64
 	bne	.LBB1_10
-	ldr	r10, [sp, #164]
-	movw	r0, #8288
-	movw	r11, #61440
-	mov	r2, #0
-	vmov.i32	q8, #0x0
-	mov	r6, #10240
-	movt	r11, #65535
-	add	r12, r10, r0
-	movw	r0, #4176
-	mov	r5, r10
-	add	r9, r10, r0
-	movw	r0, #6224
-	add	r7, r10, r0
-	movw	r0, #8272
-	add	lr, r10, r0
-	movw	r0, #10320
-	add	r0, r10, r0
-	str	r0, [sp, #60]
-	movw	r0, #8224
-	add	r4, r10, r0
-	movw	r0, #4112
-	add	r8, r10, r0
-	movw	r0, #6160
-	add	r1, r10, r0
-	movw	r0, #8208
-	add	r3, r10, r0
-	movw	r0, #10256
-	add	r0, r10, r0
-	str	r0, [sp, #52]
-	mov	r0, r1
-	ldr	r1, [sp, #20]
-	str	r1, [sp, #160]
-	mov	r1, r3
-	mov	r3, #0
-	str	r3, [sp, #48]
-	str	r12, [sp, #64]
-	str	r4, [sp, #56]
-.LBB1_14:
-	str	r9, [sp, #44]
-	str	r7, [sp, #40]
-	mov	r3, r7
-	str	lr, [sp, #36]
-	str	r8, [sp, #32]
-	str	r8, [sp, #108]
-	str	r0, [sp, #28]
-	str	r0, [sp, #104]
-	str	r1, [sp, #24]
-	str	r1, [sp, #100]
-	mov	r7, lr
-	mov	r1, r2
-	mov	r0, #0
-	str	r5, [sp, #116]
-	str	r0, [sp, #96]
-	str	r2, [sp, #72]
-	str	r5, [sp, #68]
-.LBB1_15:
-	str	r7, [sp, #88]
-	str	r3, [sp, #92]
-	add	r12, sp, #100
-	ldr	r0, [sp, #52]
-	str	r1, [sp, #112]
-	ldm	r12, {r8, r10, r12}
-	ldr	lr, [sp, #116]
-	add	r0, r0, r1
-	mov	r1, #0
-.LBB1_16:
-	add	r2, lr, r1
-	mov	r3, r2
-	add	r7, r2, #16
-	vst1.32	{d16, d17}, [r3], r6
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r2, #2048
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r2, #2064
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r2, #4096
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r12, r1
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r2, #6144
-	add	r2, r2, #8192
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r10, r1
-	vst1.32	{d16, d17}, [r7]
-	vst1.32	{d16, d17}, [r2]
-	add	r2, r8, r1
-	vst1.32	{d16, d17}, [r2]
-	add	r2, r0, r1
-	add	r1, r1, #12288
-	vst1.32	{d16, d17}, [r3]
-	cmp	r1, #135168
-	vst1.32	{d16, d17}, [r2]
-	bne	.LBB1_16
-	ldr	r8, [sp, #112]
-	ldr	r6, [sp, #164]
-	mov	r0, #11
-	mov	r1, r8
-.LBB1_18:
-	add	r2, r6, r1
-	subs	r0, r0, #1
-	add	r3, r2, #32
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #48
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #2080
-	add	r2, r2, #2096
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r2]
-	add	r2, r4, r1
-	add	r1, r1, #12288
-	add	r3, r2, r11
-	add	r7, r3, #16
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r3, #2048
-	add	r3, r3, #2064
-	vst1.32	{d16, d17}, [r7]
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #16
-	vst1.32	{d16, d17}, [r2]
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #2048
-	add	r2, r2, #2064
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r2]
-	bne	.LBB1_18
-	ldr	r0, [sp, #60]
-	ldr	r7, [sp, #116]
-	ldr	lr, [sp, #64]
-	ldr	r5, [sp, #92]
-	ldr	r6, [sp, #88]
-	mov	r1, #0
-	add	r0, r0, r8
-.LBB1_20:
-	add	r2, r7, r1
-	add	r3, r2, #64
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #80
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #2112
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #2128
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #4160
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r9, r1
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #6208
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r5, r1
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #8256
-	add	r2, r2, #10304
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r6, r1
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r2]
-	add	r2, r0, r1
-	add	r1, r1, #12288
-	cmp	r1, #135168
-	vst1.32	{d16, d17}, [r2]
-	bne	.LBB1_20
-	mov	r0, #11
-	mov	r1, r8
-	str	r9, [sp, #80]
-.LBB1_22:
-	ldr	r2, [sp, #164]
-	subs	r0, r0, #1
-	add	r2, r2, r1
-	add	r3, r2, #96
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #112
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #2144
-	add	r2, r2, #2160
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r2]
-	add	r2, lr, r1
-	add	r1, r1, #12288
-	add	r3, r2, r11
-	add	r7, r3, #16
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r7]
-	add	r7, r3, #2048
-	add	r3, r3, #2064
-	vst1.32	{d16, d17}, [r7]
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #16
-	vst1.32	{d16, d17}, [r2]
-	vst1.32	{d16, d17}, [r3]
-	add	r3, r2, #2048
-	add	r2, r2, #2064
-	vst1.32	{d16, d17}, [r3]
-	vst1.32	{d16, d17}, [r2]
-	bne	.LBB1_22
-	ldr	r1, [sp, #96]
-	mov	r0, #22
+	add	r12, r12, #1
+	add	lr, lr, #65536
+	add	r9, r9, #65536
+	cmp	r12, #64
+	bne	.LBB1_9
+	ldr	r1, [sp, #40]
+	ldr	r10, [sp, #16]
+	movw	r8, #12288
+	movw	r0, #57360
 	mov	r4, #0
-	mul	r0, r1, r0
-	str	r0, [sp, #76]
-	add	r0, r1, r1, lsl #5
-	ldr	r1, [sp, #84]
-	add	r0, r1, r0, lsl #12
-	add	r1, r0, #122880
+	vmov.i32	q8, #0x0
+	mov	r9, #108544
+	movt	r8, #65535
+	add	r12, r1, r0
+	mov	r0, #0
+	str	r12, [sp, #20]
+.LBB1_13:
+	str	r0, [sp, #24]
+	mov	r6, #4
+	mov	r1, r4
+	ldr	lr, [sp, #40]
+.LBB1_14:
+	add	r5, lr, r1
+	add	r7, r12, r1
+	add	r1, r1, #32
+	subs	r6, r6, #1
+	mov	r3, r5
+	add	r0, r5, #16
+	add	r2, r5, #6144
+	vst1.32	{d16, d17}, [r3], r9
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #2048
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #2064
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #4096
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, r8
+	vst1.32	{d16, d17}, [r0]
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #2048
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #8192
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #4096
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #10240
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #6144
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #12288
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #8192
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #14336
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #10240
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #16384
+	vst1.32	{d16, d17}, [r2]
 	add	r2, r0, #12288
-	str	r1, [sp, #152]
-	add	r1, r0, #110592
-	str	r1, [sp, #148]
-	add	r1, r0, #98304
-	str	r1, [sp, #144]
-	add	r1, r0, #86016
-	str	r1, [sp, #140]
-	add	r1, r0, #73728
-	str	r1, [sp, #136]
-	add	r1, r0, #61440
-	str	r1, [sp, #132]
-	add	r1, r0, #49152
-	str	r1, [sp, #128]
-	add	r1, r0, #36864
-	str	r1, [sp, #124]
-	add	r1, r0, #24576
-	str	r1, [sp, #120]
-	str	r0, [sp, #156]
-.LBB1_24:
-	ldr	r0, [sp, #164]
-	ldr	r7, [sp, #156]
-	mov	r9, #256
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #18432
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #14336
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #20480
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #16384
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #22528
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #18432
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #24576
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #20480
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #26624
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #22528
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #28672
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #24576
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #30720
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #26624
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #32768
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #28672
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #34816
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #30720
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #36864
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #32768
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #38912
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #34816
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #40960
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #36864
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #43008
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #38912
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #45056
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #40960
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #47104
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #43008
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #49152
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #45056
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #51200
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #47104
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #53248
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r0, #49152
+	add	r0, r0, #51200
+	vst1.32	{d16, d17}, [r2]
+	add	r2, r5, #55296
+	vst1.32	{d16, d17}, [r2]
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #57344
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #59392
+	vst1.32	{d16, d17}, [r7]
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #2048
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #61440
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #4096
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #63488
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #6144
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #65536
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #8192
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #67584
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #10240
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #69632
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #12288
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #71680
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #14336
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #73728
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #16384
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #75776
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #18432
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #77824
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #20480
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #79872
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #22528
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #81920
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #24576
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #83968
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #26624
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #86016
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #28672
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #88064
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #30720
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #90112
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #32768
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #92160
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #34816
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #94208
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #36864
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #96256
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #38912
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #98304
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #40960
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #100352
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #43008
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #102400
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #45056
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #104448
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #47104
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r5, #106496
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #49152
+	vst1.32	{d16, d17}, [r0]
+	add	r0, r7, #51200
+	vst1.32	{d16, d17}, [r3]
+	vst1.32	{d16, d17}, [r0]
+	bne	.LBB1_14
+	mov	r0, #0
+	mov	lr, r10
+	str	r10, [sp, #28]
+	str	r4, [sp, #36]
+.LBB1_16:
+	str	r0, [sp, #44]
+	add	r0, r0, r0, lsl #1
+	mov	r10, #0
+	ldr	r1, [sp, #32]
+	add	r0, r1, r0, lsl #11
+	add	r1, r0, #393216
+	add	r8, r0, #98304
+	mov	r9, r0
+	add	r11, r0, #49152
+	str	r1, [sp, #68]
+	add	r1, r0, #344064
+	str	r1, [sp, #64]
+	add	r1, r0, #294912
+	str	r1, [sp, #60]
+	add	r1, r0, #245760
+	str	r1, [sp, #56]
+	add	r1, r0, #196608
+	str	r1, [sp, #52]
+	add	r1, r0, #147456
+	str	r1, [sp, #48]
+	ldr	r12, [sp, #40]
+.LBB1_17:
+	add	r2, r12, r4
+	add	r7, lr, r10
+	mov	r3, #256
+	mov	r5, r9
 	mov	r6, #512
-	mov	r3, r2
-	mov	r5, #256
-	add	lr, r0, r8
-	ldr	r0, [sp, #160]
-	add	r8, r8, #32
-	mov	r11, lr
-	add	r10, r0, r4
-	mov	r0, #512
-	add	r4, r4, #16384
-	mov	r12, r10
+	add	r10, r10, #65536
+	add	r4, r4, #32
+	mov	r0, r2
+	mov	r1, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -1162,8 +1269,8 @@ default_function:
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
 .Ltmp34:
-	vld1.32	{d4, d5, d6, d7}, [r12]!
-	vld1.32	{d0, d1, d2}, [r7]!
+	vld1.32	{d4, d5, d6, d7}, [r1]!
+	vld1.32	{d0, d1, d2}, [r5]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
 	vmla.f32	q6, q2, d0[1]
@@ -1176,37 +1283,40 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r9, r9, #1
+	subs	r3, r3, #1
 	bne	.Ltmp34
 	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r11]
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r11], r6
-	vld1.32	{d4, d5, d6, d7}, [r11]
+	vst1.32	{d0, d1, d2, d3}, [r0], r6
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r11], r6
-	vld1.32	{d0, d1, d2, d3}, [r11]
+	vst1.32	{d4, d5, d6, d7}, [r0], r6
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r11], r6
-	vld1.32	{d4, d5, d6, d7}, [r11]
+	vst1.32	{d0, d1, d2, d3}, [r0], r6
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r11], r6
-	vld1.32	{d0, d1, d2, d3}, [r11]
+	vst1.32	{d4, d5, d6, d7}, [r0], r6
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r11], r6
-	vld1.32	{d4, d5, d6, d7}, [r11]
+	vst1.32	{d0, d1, d2, d3}, [r0], r6
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r11]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	add	r7, lr, #12288
-	mov	r6, r10
+	add	r0, r2, #12288
+	mov	r1, r11
+	mov	r3, #256
+	mov	r5, #512
+	mov	r6, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -1222,7 +1332,7 @@ default_function:
 	vmov.i32	q15, #0x0
 .Ltmp35:
 	vld1.32	{d4, d5, d6, d7}, [r6]!
-	vld1.32	{d0, d1, d2}, [r3]!
+	vld1.32	{d0, d1, d2}, [r1]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
 	vmla.f32	q6, q2, d0[1]
@@ -1235,40 +1345,40 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r5, r5, #1
+	subs	r3, r3, #1
 	bne	.Ltmp35
-	lsl	r0, r0, #2
-	vld1.32	{d0, d1, d2, d3}, [r7]
+	lsl	r5, r5, #2
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r7], r0
-	vld1.32	{d4, d5, d6, d7}, [r7]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r7], r0
-	vld1.32	{d0, d1, d2, d3}, [r7]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r7], r0
-	vld1.32	{d4, d5, d6, d7}, [r7]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r7], r0
-	vld1.32	{d0, d1, d2, d3}, [r7]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r7], r0
-	vld1.32	{d4, d5, d6, d7}, [r7]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r7]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r1, [sp, #120]
-	add	r0, lr, #24576
-	mov	r3, r10
-	mov	r7, #256
-	mov	r6, #512
+	add	r0, r2, #24576
+	mov	r1, #256
+	mov	r3, r8
+	mov	r5, #512
+	mov	r6, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -1283,502 +1393,7 @@ default_function:
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
 .Ltmp36:
-	vld1.32	{d4, d5, d6, d7}, [r3]!
-	vld1.32	{d0, d1, d2}, [r1]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r7, r7, #1
-	bne	.Ltmp36
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r7, [sp, #124]
-	add	r0, lr, #36864
-	mov	r1, r10
-	mov	r3, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp37:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [r7]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp37
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r1, [sp, #128]
-	add	r0, lr, #49152
-	mov	r3, r10
-	mov	r7, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp38:
-	vld1.32	{d4, d5, d6, d7}, [r3]!
-	vld1.32	{d0, d1, d2}, [r1]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r7, r7, #1
-	bne	.Ltmp38
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r7, [sp, #132]
-	add	r0, lr, #61440
-	mov	r1, r10
-	mov	r3, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp39:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [r7]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp39
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r3, [sp, #136]
-	add	r0, lr, #73728
-	mov	r1, r10
-	mov	r7, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp40:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [r3]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r7, r7, #1
-	bne	.Ltmp40
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r7, [sp, #140]
-	add	r0, lr, #86016
-	mov	r1, r10
-	mov	r3, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp41:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [r7]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp41
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r7, [sp, #144]
-	add	r0, lr, #98304
-	mov	r1, r10
-	mov	r3, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp42:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [r7]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp42
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r6
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r6
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r6, [sp, #148]
-	add	r0, lr, #110592
-	mov	r1, r10
-	mov	r3, #256
-	mov	r7, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp43:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [r6]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp43
-	lsl	r7, r7, #2
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r7
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r7
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r7
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r7
-	vld1.32	{d0, d1, d2, d3}, [r0]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r7
-	vld1.32	{d4, d5, d6, d7}, [r0]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r0]
-
-	@NO_APP
-	ldr	r3, [sp, #152]
-	add	r0, lr, #122880
-	mov	r1, #256
-	mov	r7, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp44:
-	vld1.32	{d4, d5, d6, d7}, [r10]!
+	vld1.32	{d4, d5, d6, d7}, [r6]!
 	vld1.32	{d0, d1, d2}, [r3]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
@@ -1793,78 +1408,39 @@ default_function:
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
 	subs	r1, r1, #1
-	bne	.Ltmp44
-	lsl	r7, r7, #2
+	bne	.Ltmp36
+	lsl	r5, r5, #2
 	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r0], r7
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
 	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r0], r7
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
 	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r0], r7
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
 	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r0], r7
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
 	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r0], r7
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
 	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
 	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	cmp	r4, #65536
-	bne	.LBB1_24
-	ldr	r0, [sp, #76]
-	ldr	r1, [sp, #84]
-	mov	r2, #8192
-	orr	r0, r0, #1
-	add	r0, r0, r0, lsl #1
-	add	r0, r1, r0, lsl #11
-	add	r1, r0, #122880
-	mov	r9, r0
-	add	r11, r0, #12288
-	str	r1, [sp, #156]
-	add	r1, r0, #110592
-	str	r1, [sp, #152]
-	add	r1, r0, #98304
-	str	r1, [sp, #148]
-	add	r1, r0, #86016
-	str	r1, [sp, #144]
-	add	r1, r0, #73728
-	str	r1, [sp, #140]
-	add	r1, r0, #61440
-	str	r1, [sp, #136]
-	add	r1, r0, #49152
-	str	r1, [sp, #132]
-	add	r1, r0, #36864
-	str	r1, [sp, #128]
-	add	r1, r0, #24576
-	str	r1, [sp, #124]
-	ldr	r12, [sp, #112]
-.LBB1_26:
-	ldr	r0, [sp, #164]
-	mov	lr, r9
-	mov	r10, #512
-	mov	r3, #256
-	mov	r6, r11
-	mov	r5, #256
-	add	r7, r0, r12
-	ldr	r0, [sp, #160]
-	add	r12, r12, #32
-	mov	r8, r7
-	add	r0, r0, r2
-	add	r2, r2, #16384
-	mov	r1, r0
-	mov	r4, r0
+	ldr	r3, [sp, #48]
+	add	r0, r2, #36864
+	mov	r1, #256
+	mov	r5, #512
+	mov	r6, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -1878,130 +1454,9 @@ default_function:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp45:
-	vld1.32	{d4, d5, d6, d7}, [r1]!
-	vld1.32	{d0, d1, d2}, [lr]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp45
-	lsl	r10, r10, #2
-	vld1.32	{d0, d1, d2, d3}, [r8]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r8], r10
-	vld1.32	{d4, d5, d6, d7}, [r8]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r8], r10
-	vld1.32	{d0, d1, d2, d3}, [r8]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r8], r10
-	vld1.32	{d4, d5, d6, d7}, [r8]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r8], r10
-	vld1.32	{d0, d1, d2, d3}, [r8]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r8], r10
-	vld1.32	{d4, d5, d6, d7}, [r8]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r8]
-
-	@NO_APP
-	add	r1, r7, #12288
-	mov	r3, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp46:
-	vld1.32	{d4, d5, d6, d7}, [r4]!
-	vld1.32	{d0, d1, d2}, [r6]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r5, r5, #1
-	bne	.Ltmp46
-	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
-
-	@NO_APP
-	ldr	r4, [sp, #124]
-	add	r1, r7, #24576
-	mov	r3, #512
-	mov	r6, r0
-	mov	r5, #256
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp47:
+.Ltmp37:
 	vld1.32	{d4, d5, d6, d7}, [r6]!
-	vld1.32	{d0, d1, d2}, [r4]!
+	vld1.32	{d0, d1, d2}, [r3]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
 	vmla.f32	q6, q2, d0[1]
@@ -2014,40 +1469,40 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r5, r5, #1
-	bne	.Ltmp47
-	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	subs	r1, r1, #1
+	bne	.Ltmp37
+	lsl	r5, r5, #2
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r5, [sp, #128]
-	add	r1, r7, #36864
+	ldr	r5, [sp, #52]
+	add	r0, r2, #49152
+	mov	r1, #256
 	mov	r3, #512
-	mov	r6, r0
-	mov	r4, #256
+	mov	r6, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -2061,7 +1516,7 @@ default_function:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp48:
+.Ltmp38:
 	vld1.32	{d4, d5, d6, d7}, [r6]!
 	vld1.32	{d0, d1, d2}, [r5]!
 	vmla.f32	q4, q2, d0[0]
@@ -2076,40 +1531,40 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r4, r4, #1
-	bne	.Ltmp48
+	subs	r1, r1, #1
+	bne	.Ltmp38
 	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r3
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r3
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r3, [sp, #132]
-	add	r1, r7, #49152
-	mov	r6, #512
-	mov	r5, r0
-	mov	r4, #256
+	ldr	r3, [sp, #56]
+	add	r0, r2, #61440
+	mov	r1, #256
+	mov	r5, #512
+	mov	r6, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -2123,8 +1578,8 @@ default_function:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp49:
-	vld1.32	{d4, d5, d6, d7}, [r5]!
+.Ltmp39:
+	vld1.32	{d4, d5, d6, d7}, [r6]!
 	vld1.32	{d0, d1, d2}, [r3]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
@@ -2138,40 +1593,40 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r4, r4, #1
-	bne	.Ltmp49
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	subs	r1, r1, #1
+	bne	.Ltmp39
+	lsl	r5, r5, #2
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r6
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r6
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r6
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r6
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r6
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r4, [sp, #136]
-	add	r1, r7, #61440
+	ldr	r6, [sp, #60]
+	add	r0, r2, #73728
+	mov	r1, #256
 	mov	r3, #512
-	mov	r6, r0
-	mov	r5, #256
+	mov	r5, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -2185,69 +1640,7 @@ default_function:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp50:
-	vld1.32	{d4, d5, d6, d7}, [r6]!
-	vld1.32	{d0, d1, d2}, [r4]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r5, r5, #1
-	bne	.Ltmp50
-	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
-
-	@NO_APP
-	ldr	r6, [sp, #140]
-	add	r1, r7, #73728
-	mov	r3, #512
-	mov	r5, r0
-	mov	r4, #256
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp51:
+.Ltmp40:
 	vld1.32	{d4, d5, d6, d7}, [r5]!
 	vld1.32	{d0, d1, d2}, [r6]!
 	vmla.f32	q4, q2, d0[0]
@@ -2262,40 +1655,40 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r4, r4, #1
-	bne	.Ltmp51
+	subs	r1, r1, #1
+	bne	.Ltmp40
 	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r3
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r3
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r4, [sp, #144]
-	add	r1, r7, #86016
-	mov	r3, #512
-	mov	r6, r0
-	mov	r5, #256
+	ldr	r3, [sp, #64]
+	add	r0, r2, #86016
+	mov	r1, #256
+	mov	r5, #512
+	mov	r6, r7
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -2309,9 +1702,9 @@ default_function:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp52:
+.Ltmp41:
 	vld1.32	{d4, d5, d6, d7}, [r6]!
-	vld1.32	{d0, d1, d2}, [r4]!
+	vld1.32	{d0, d1, d2}, [r3]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
 	vmla.f32	q6, q2, d0[1]
@@ -2324,40 +1717,39 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r5, r5, #1
-	bne	.Ltmp52
-	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	subs	r1, r1, #1
+	bne	.Ltmp41
+	lsl	r5, r5, #2
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r5
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r5
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r6, [sp, #148]
-	add	r1, r7, #98304
+	ldr	r1, [sp, #68]
+	add	r0, r2, #98304
+	mov	r2, #256
 	mov	r3, #512
-	mov	r5, r0
-	mov	r4, #256
 	@APP
 	vmov.i32	q4, #0x0
 	vmov.i32	q5, #0x0
@@ -2371,9 +1763,9 @@ default_function:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp53:
-	vld1.32	{d4, d5, d6, d7}, [r5]!
-	vld1.32	{d0, d1, d2}, [r6]!
+.Ltmp42:
+	vld1.32	{d4, d5, d6, d7}, [r7]!
+	vld1.32	{d0, d1, d2}, [r1]!
 	vmla.f32	q4, q2, d0[0]
 	vmla.f32	q5, q3, d0[0]
 	vmla.f32	q6, q2, d0[1]
@@ -2386,299 +1778,238 @@ default_function:
 	vmla.f32	q13, q3, d2[0]
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
-	subs	r4, r4, #1
-	bne	.Ltmp53
+	subs	r2, r2, #1
+	bne	.Ltmp42
 	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q4
 	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q6
 	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r3
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q8
 	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q10
 	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0], r3
+	vld1.32	{d0, d1, d2, d3}, [r0]
 	vadd.f32	q0, q0, q12
 	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d0, d1, d2, d3}, [r0], r3
+	vld1.32	{d4, d5, d6, d7}, [r0]
 	vadd.f32	q2, q2, q14
 	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
+	vst1.32	{d4, d5, d6, d7}, [r0]
 
 	@NO_APP
-	ldr	r4, [sp, #152]
-	add	r1, r7, #110592
-	mov	r3, #512
-	mov	r6, r0
-	mov	r5, #256
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp54:
-	vld1.32	{d4, d5, d6, d7}, [r6]!
-	vld1.32	{d0, d1, d2}, [r4]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r5, r5, #1
-	bne	.Ltmp54
-	lsl	r3, r3, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r3
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r3
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
-
-	@NO_APP
-	add	r1, r7, #122880
-	ldr	r7, [sp, #156]
-	mov	r3, #256
-	mov	r6, #512
-	@APP
-	vmov.i32	q4, #0x0
-	vmov.i32	q5, #0x0
-	vmov.i32	q6, #0x0
-	vmov.i32	q7, #0x0
-	vmov.i32	q8, #0x0
-	vmov.i32	q9, #0x0
-	vmov.i32	q10, #0x0
-	vmov.i32	q11, #0x0
-	vmov.i32	q12, #0x0
-	vmov.i32	q13, #0x0
-	vmov.i32	q14, #0x0
-	vmov.i32	q15, #0x0
-.Ltmp55:
-	vld1.32	{d4, d5, d6, d7}, [r0]!
-	vld1.32	{d0, d1, d2}, [r7]!
-	vmla.f32	q4, q2, d0[0]
-	vmla.f32	q5, q3, d0[0]
-	vmla.f32	q6, q2, d0[1]
-	vmla.f32	q7, q3, d0[1]
-	vmla.f32	q8, q2, d1[0]
-	vmla.f32	q9, q3, d1[0]
-	vmla.f32	q10, q2, d1[1]
-	vmla.f32	q11, q3, d1[1]
-	vmla.f32	q12, q2, d2[0]
-	vmla.f32	q13, q3, d2[0]
-	vmla.f32	q14, q2, d2[1]
-	vmla.f32	q15, q3, d2[1]
-	subs	r3, r3, #1
-	bne	.Ltmp55
-	lsl	r6, r6, #2
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q4
-	vadd.f32	q1, q1, q5
-	vst1.32	{d0, d1, d2, d3}, [r1], r6
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q6
-	vadd.f32	q3, q3, q7
-	vst1.32	{d4, d5, d6, d7}, [r1], r6
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q8
-	vadd.f32	q1, q1, q9
-	vst1.32	{d0, d1, d2, d3}, [r1], r6
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q10
-	vadd.f32	q3, q3, q11
-	vst1.32	{d4, d5, d6, d7}, [r1], r6
-	vld1.32	{d0, d1, d2, d3}, [r1]
-	vadd.f32	q0, q0, q12
-	vadd.f32	q1, q1, q13
-	vst1.32	{d0, d1, d2, d3}, [r1], r6
-	vld1.32	{d4, d5, d6, d7}, [r1]
-	vadd.f32	q2, q2, q14
-	vadd.f32	q3, q3, q15
-	vst1.32	{d4, d5, d6, d7}, [r1]
-
-	@NO_APP
-	cmp	r2, #73728
-	bne	.LBB1_26
-	ldr	r0, [sp, #108]
-	ldr	r9, [sp, #80]
-	ldr	r3, [sp, #92]
-	ldr	r7, [sp, #88]
-	movw	r11, #61440
-	vmov.i32	q8, #0x0
-	mov	r6, #10240
-	movt	r11, #65535
-	add	r0, r0, #135168
-	add	r9, r9, #135168
-	add	r3, r3, #135168
-	add	r7, r7, #135168
-	str	r0, [sp, #108]
-	ldr	r0, [sp, #104]
-	add	r0, r0, #135168
-	str	r0, [sp, #104]
-	ldr	r0, [sp, #100]
-	add	r0, r0, #135168
-	str	r0, [sp, #100]
-	ldr	r0, [sp, #116]
-	add	r0, r0, #135168
-	str	r0, [sp, #116]
-	ldr	r0, [sp, #96]
-	ldr	r1, [sp, #112]
+	cmp	r10, #262144
+	bne	.LBB1_17
+	ldr	r0, [sp, #44]
+	ldr	r4, [sp, #36]
+	add	lr, lr, #8192
 	add	r0, r0, #1
-	add	r1, r1, #135168
-	str	r0, [sp, #96]
-	cmp	r0, #3
-	ldr	r4, [sp, #56]
-	ldr	r2, [sp, #72]
-	ldr	r5, [sp, #68]
-	bne	.LBB1_15
-	ldr	r0, [sp, #160]
-	add	r5, r5, #128
-	add	r2, r2, #128
-	add	r0, r0, #65536
-	str	r0, [sp, #160]
-	ldr	r3, [sp, #48]
-	ldr	r9, [sp, #44]
-	ldr	r7, [sp, #40]
-	ldr	lr, [sp, #36]
-	ldr	r8, [sp, #32]
-	ldr	r0, [sp, #28]
-	ldr	r1, [sp, #24]
-	add	r3, r3, #1
-	add	r9, r9, #128
-	add	r7, r7, #128
-	add	lr, lr, #128
-	add	r8, r8, #128
-	add	r0, r0, #128
-	add	r1, r1, #128
-	cmp	r3, #16
-	str	r3, [sp, #48]
-	bne	.LBB1_14
-	ldr	lr, [sp, #164]
-	ldr	r11, [sp, #12]
+	cmp	r0, #8
+	bne	.LBB1_16
+	ldr	r0, [sp, #24]
+	ldr	r10, [sp, #28]
+	ldr	r12, [sp, #20]
+	movw	r8, #12288
+	add	r4, r4, #128
+	vmov.i32	q8, #0x0
+	mov	r9, #108544
+	movt	r8, #65535
+	add	r0, r0, #1
+	add	r10, r10, #262144
+	cmp	r0, #16
+	bne	.LBB1_13
+	ldr	r1, [sp, #8]
+	ldr	r9, [sp, #40]
 	mov	r0, #0
-	mov	r1, #4096
-	mov	r3, #6144
-	mov	r7, #8192
-	mov	r10, #16384
-.LBB1_30:
-	mov	r12, #0
-	str	r0, [sp, #160]
-.LBB1_31:
-	mov	r6, lr
-	mov	r9, r11
+	mov	r3, #86016
+	mov	r7, #88064
+	mov	r6, #90112
+	mov	r10, #92160
+	mov	r12, #94208
+	mov	lr, #96256
+	mov	r8, #98304
+	mov	r11, #0
+.LBB1_21:
+	mov	r5, r9
+	mov	r4, r1
+	ldr	r2, [r5, r0]!
+	add	r0, r0, #4
+	str	r2, [r4, r11]!
+	add	r11, r11, #196
+	ldr	r2, [r5, #2048]
+	cmp	r11, #100352
+	str	r2, [r4, #4]
+	mov	r2, #4096
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #8]
+	mov	r2, #6144
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #12]
+	mov	r2, #8192
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #16]
 	mov	r2, #10240
-	ldr	r8, [r6, r12, lsl #9]!
-	str	r8, [r9, r12]!
-	add	r12, r12, #56
-	ldr	r4, [r6, r1]
-	ldr	r0, [r6, r3]
-	mov	r3, #12288
-	ldr	r1, [r6, r7]
-	mov	r7, #14336
-	ldr	r5, [r6, #2048]
-	ldr	r2, [r6, r2]
-	ldr	r8, [r6, r10]
-	cmp	r12, #784
-	ldr	r3, [r6, r3]
-	ldr	r7, [r6, r7]
-	str	r5, [r9, #4]
-	str	r4, [r9, #8]
-	add	r4, r9, #12
-	mov	r5, #18432
-	stm	r4, {r0, r1, r2, r3, r7}
-	str	r8, [r9, #32]
-	mov	r3, #24576
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #20]
+	mov	r2, #12288
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #24]
+	mov	r2, #14336
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #28]
+	mov	r2, #16384
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #32]
+	mov	r2, #18432
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #36]
+	mov	r2, #20480
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #40]
 	mov	r2, #22528
-	mov	r1, #20480
-	mov	r4, #26624
-	mov	r7, #8192
-	ldr	r0, [r6, r5]
-	ldr	r1, [r6, r1]
-	ldr	r2, [r6, r2]
-	ldr	r3, [r6, r3]
-	ldr	r4, [r6, r4]
-	str	r0, [r9, #36]
-	str	r1, [r9, #40]
-	str	r2, [r9, #44]
-	str	r3, [r9, #48]
-	mov	r1, #4096
-	mov	r3, #6144
-	str	r4, [r9, #52]
-	bne	.LBB1_31
-	ldr	r0, [sp, #160]
-	add	r11, r11, #784
-	add	lr, lr, #4
-	add	r0, r0, #1
-	cmp	r0, #512
-	bne	.LBB1_30
-	ldr	r4, .LCPI1_2
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #44]
+	mov	r2, #24576
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #48]
+	mov	r2, #26624
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #52]
+	mov	r2, #28672
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #56]
+	mov	r2, #30720
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #60]
+	mov	r2, #32768
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #64]
+	mov	r2, #34816
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #68]
+	mov	r2, #36864
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #72]
+	mov	r2, #38912
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #76]
+	mov	r2, #40960
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #80]
+	mov	r2, #43008
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #84]
+	mov	r2, #45056
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #88]
+	mov	r2, #47104
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #92]
+	mov	r2, #49152
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #96]
+	mov	r2, #51200
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #100]
+	mov	r2, #53248
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #104]
+	mov	r2, #55296
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #108]
+	mov	r2, #57344
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #112]
+	mov	r2, #59392
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #116]
+	mov	r2, #61440
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #120]
+	mov	r2, #63488
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #124]
+	mov	r2, #65536
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #128]
+	mov	r2, #67584
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #132]
+	mov	r2, #69632
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #136]
+	mov	r2, #71680
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #140]
+	mov	r2, #73728
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #144]
+	mov	r2, #75776
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #148]
+	mov	r2, #77824
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #152]
+	mov	r2, #79872
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #156]
+	mov	r2, #81920
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #160]
+	mov	r2, #83968
+	ldr	r2, [r5, r2]
+	str	r2, [r4, #164]
+	ldr	r2, [r5, r3]
+	str	r2, [r4, #168]
+	ldr	r2, [r5, r7]
+	str	r2, [r4, #172]
+	ldr	r2, [r5, r6]
+	str	r2, [r4, #176]
+	ldr	r2, [r5, r10]
+	str	r2, [r4, #180]
+	ldr	r2, [r5, r12]
+	str	r2, [r4, #184]
+	ldr	r2, [r5, lr]
+	str	r2, [r4, #188]
+	ldr	r2, [r5, r8]
+	str	r2, [r4, #192]
+	bne	.LBB1_21
+	ldr	r4, .LCPI1_1
 	mov	r0, #1
+	mov	r2, r9
 .LPC1_1:
 	ldr	r4, [pc, r4]
-	ldr	r5, [sp, #16]
-	ldr	r2, [sp, #164]
+	ldr	r5, [sp, #12]
 	ldr	r3, [r4]
 	mov	r1, r5
 	blx	r3
 	ldr	r3, [r4]
-	ldr	r2, [sp, #20]
+	ldr	r2, [sp, #16]
 	mov	r0, #1
 	mov	r1, r5
 	blx	r3
 	ldr	r3, [r4]
-	ldr	r2, [sp, #84]
+	ldr	r2, [sp, #32]
 	mov	r0, #1
 	mov	r1, r5
-	add	sp, sp, #168
+	add	sp, sp, #72
 	vpop	{d8, d9, d10, d11, d12, d13, d14, d15}
 	add	sp, sp, #4
 	pop	{r4, r5, r6, r7, r8, r9, r10, r11, lr}
 	bx	r3
 	.p2align	2
-.LCPI1_2:
-.Ltmp56:
-	.long	__TVMBackendFreeWorkspace(GOT_PREL)-((.LPC1_1+8)-.Ltmp56)
+.LCPI1_1:
+.Ltmp43:
+	.long	__TVMBackendFreeWorkspace(GOT_PREL)-((.LPC1_1+8)-.Ltmp43)
 .Lfunc_end1:
 	.size	.Ldefault_function_compute_, .Lfunc_end1-.Ldefault_function_compute_
 	.fnend
@@ -2715,7 +2046,7 @@ sgemm_compute_6x8__neon:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp57:
+.Ltmp44:
 	vld1.32	{d4, d5, d6, d7}, [r3]!
 	vld1.32	{d0, d1, d2}, [r1]!
 	vmla.f32	q4, q2, d0[0]
@@ -2731,7 +2062,7 @@ sgemm_compute_6x8__neon:
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
 	subs	r0, r0, #1
-	bne	.Ltmp57
+	bne	.Ltmp44
 	lsl	r5, r5, #2
 	vst1.32	{d8, d9, d10, d11}, [r2], r5
 	vst1.32	{d12, d13, d14, d15}, [r2], r5
@@ -2812,7 +2143,7 @@ sgemm_update_6x8__neon:
 	vmov.i32	q13, #0x0
 	vmov.i32	q14, #0x0
 	vmov.i32	q15, #0x0
-.Ltmp58:
+.Ltmp45:
 	vld1.32	{d4, d5, d6, d7}, [r3]!
 	vld1.32	{d0, d1, d2}, [r1]!
 	vmla.f32	q4, q2, d0[0]
@@ -2828,7 +2159,7 @@ sgemm_update_6x8__neon:
 	vmla.f32	q14, q2, d2[1]
 	vmla.f32	q15, q3, d2[1]
 	subs	r0, r0, #1
-	bne	.Ltmp58
+	bne	.Ltmp45
 	lsl	r5, r5, #2
 	vld1.32	{d0, d1, d2, d3}, [r2]
 	vadd.f32	q0, q0, q4
@@ -2879,18 +2210,18 @@ __TVMAPISetLastError:
 
 	.type	.L.str.1,%object
 .L.str.1:
-	.asciz	"Assert fail: ((((1 == int32(arg0.strides[3])) && ((1*14) == int32(arg0.strides[2]))) && (((1*14)*14) == int32(arg0.strides[1]))) && ((((1*14)*14)*512) == int32(arg0.strides[0]))), arg0.strides: expected to be compact array"
-	.size	.L.str.1, 223
+	.asciz	"Assert fail: ((((1 == int32(arg0.strides[3])) && ((1*7) == int32(arg0.strides[2]))) && (((1*7)*7) == int32(arg0.strides[1]))) && ((((1*7)*7)*2048) == int32(arg0.strides[0]))), arg0.strides: expected to be compact array"
+	.size	.L.str.1, 219
 
 	.type	.L.str.2,%object
 .L.str.2:
-	.asciz	"Assert fail: ((((1 == int32(arg1.strides[3])) && ((1*1) == int32(arg1.strides[2]))) && (((1*1)*1) == int32(arg1.strides[1]))) && ((((1*1)*1)*512) == int32(arg1.strides[0]))), arg1.strides: expected to be compact array"
-	.size	.L.str.2, 218
+	.asciz	"Assert fail: ((((1 == int32(arg1.strides[3])) && ((1*1) == int32(arg1.strides[2]))) && (((1*1)*1) == int32(arg1.strides[1]))) && ((((1*1)*1)*2048) == int32(arg1.strides[0]))), arg1.strides: expected to be compact array"
+	.size	.L.str.2, 219
 
 	.type	.L.str.3,%object
 .L.str.3:
-	.asciz	"Assert fail: ((((1 == int32(arg2.strides[3])) && ((1*14) == int32(arg2.strides[2]))) && (((1*14)*14) == int32(arg2.strides[1]))) && ((((1*14)*14)*512) == int32(arg2.strides[0]))), arg2.strides: expected to be compact array"
-	.size	.L.str.3, 223
+	.asciz	"Assert fail: ((((1 == int32(arg2.strides[3])) && ((1*7) == int32(arg2.strides[2]))) && (((1*7)*7) == int32(arg2.strides[1]))) && ((((1*7)*7)*512) == int32(arg2.strides[0]))), arg2.strides: expected to be compact array"
+	.size	.L.str.3, 218
 
 	.type	.L.str.4,%object
 .L.str.4:
@@ -2929,18 +2260,18 @@ __TVMAPISetLastError:
 
 	.type	.L.str.11,%object
 .L.str.11:
-	.asciz	"Assert fail: (int32(arg0.shape[1]) == 512), Argument arg0.shape[1] has an unsatisfied constraint"
-	.size	.L.str.11, 97
+	.asciz	"Assert fail: (int32(arg0.shape[1]) == 2048), Argument arg0.shape[1] has an unsatisfied constraint"
+	.size	.L.str.11, 98
 
 	.type	.L.str.12,%object
 .L.str.12:
-	.asciz	"Assert fail: (int32(arg0.shape[2]) == 14), Argument arg0.shape[2] has an unsatisfied constraint"
-	.size	.L.str.12, 96
+	.asciz	"Assert fail: (int32(arg0.shape[2]) == 7), Argument arg0.shape[2] has an unsatisfied constraint"
+	.size	.L.str.12, 95
 
 	.type	.L.str.13,%object
 .L.str.13:
-	.asciz	"Assert fail: (int32(arg0.shape[3]) == 14), Argument arg0.shape[3] has an unsatisfied constraint"
-	.size	.L.str.13, 96
+	.asciz	"Assert fail: (int32(arg0.shape[3]) == 7), Argument arg0.shape[3] has an unsatisfied constraint"
+	.size	.L.str.13, 95
 
 	.type	.L.str.14,%object
 .L.str.14:
@@ -2964,8 +2295,8 @@ __TVMAPISetLastError:
 
 	.type	.L.str.18,%object
 .L.str.18:
-	.asciz	"Assert fail: (int32(arg1.shape[1]) == 512), Argument arg1.shape[1] has an unsatisfied constraint"
-	.size	.L.str.18, 97
+	.asciz	"Assert fail: (int32(arg1.shape[1]) == 2048), Argument arg1.shape[1] has an unsatisfied constraint"
+	.size	.L.str.18, 98
 
 	.type	.L.str.19,%object
 .L.str.19:
@@ -3014,13 +2345,13 @@ __TVMAPISetLastError:
 
 	.type	.L.str.28,%object
 .L.str.28:
-	.asciz	"Assert fail: (int32(arg2.shape[2]) == 14), Argument arg2.shape[2] has an unsatisfied constraint"
-	.size	.L.str.28, 96
+	.asciz	"Assert fail: (int32(arg2.shape[2]) == 7), Argument arg2.shape[2] has an unsatisfied constraint"
+	.size	.L.str.28, 95
 
 	.type	.L.str.29,%object
 .L.str.29:
-	.asciz	"Assert fail: (int32(arg2.shape[3]) == 14), Argument arg2.shape[3] has an unsatisfied constraint"
-	.size	.L.str.29, 96
+	.asciz	"Assert fail: (int32(arg2.shape[3]) == 7), Argument arg2.shape[3] has an unsatisfied constraint"
+	.size	.L.str.29, 95
 
 	.type	.L.str.30,%object
 .L.str.30:

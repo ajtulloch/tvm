@@ -516,7 +516,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
             s = topi.generic.schedule_conv2d_nhwc([B])
             s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
-            # print(tvm.lower(s_nchw, [A_NCHW, W_NCHW, B_NCHW], simple_mode=True))
+            print(tvm.lower(s_nchw, [A_NCHW, W_NCHW, B_NCHW], simple_mode=True))
         a = tvm.nd.array(a_np, ctx)
         a_nchw = tvm.nd.array(a_np.transpose(0, 3, 1, 2), ctx)
         w = tvm.nd.array(w_np, ctx)
@@ -548,16 +548,15 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         func_nchw_tensor_mxn = remote_func(tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], target), name="func_nchw_tensor_mxn")
 
         func(a, w, b)
-        func_tensor_mxn(a, w, b_tensor_mxn)
-        # func_nchw(a_nchw, w_nchw, b_nchw)
         np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
-        # np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
-
-
-        # func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
-
-        # np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
+        func_tensor_mxn(a, w, b_tensor_mxn)
         np.testing.assert_allclose(b_tensor_mxn.asnumpy(), b_np, rtol=1e-5)
+        func_nchw(a_nchw, w_nchw, b_nchw)
+        # Fails for some reason
+        # np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
+        func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
+        np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
+
 
         (_, _, out_size, _) = get_const_tuple(B.shape)
         FLOPS = 2 * batch * in_channel * out_size * out_size * kernel * kernel * num_filter
@@ -566,12 +565,12 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         def gflops(t):
             return FLOPS / t / 1E9
         evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)(a, w, b).mean
-        # evaluator_nchw = func_nchw.time_evaluator(func_nchw.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw).mean
+        evaluator_nchw = func_nchw.time_evaluator(func_nchw.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw).mean
         # evaluator_tensor = func_tensor.time_evaluator(func_tensor.entry_name, ctx, number=REPEAT)
         evaluator_tensor_mxn = func_tensor_mxn.time_evaluator(func_tensor_mxn.entry_name, ctx, number=REPEAT)(a, w, b_tensor_mxn).mean
-        # evaluator_nchw_tensor_mxn = func_nchw_tensor_mxn.time_evaluator(func_nchw_tensor_mxn.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw_tensor_mxn).mean
+        evaluator_nchw_tensor_mxn = func_nchw_tensor_mxn.time_evaluator(func_nchw_tensor_mxn.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw_tensor_mxn).mean
 
-        print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), 0, gflops(evaluator_tensor_mxn), 0))
+        print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), gflops(evaluator_nchw), gflops(evaluator_tensor_mxn), gflops(evaluator_nchw_tensor_mxn)))
         return evaluator / evaluator_tensor_mxn
     return check_device()
 
@@ -601,7 +600,7 @@ def test_conv2d_nhwc():
     ]
 
     RESNET_18 = [
-        Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
+        # Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),

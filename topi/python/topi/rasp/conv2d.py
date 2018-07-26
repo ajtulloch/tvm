@@ -64,10 +64,21 @@ _SCHEDULES = [
     SpatialPack(1, 1, 16, 1, 32, True),
 ]
 
+
+def _get_default_schedule(wkl):
+    HPAD, WPAD = wkl.hpad, wkl.wpad
+    HSTR, WSTR = wkl.hstride, wkl.wstride
+    out_height = (wkl.height + 2 * HPAD - wkl.hkernel) // HSTR + 1
+    out_width = (wkl.width + 2 * WPAD - wkl.wkernel) // WSTR + 1
+
+    return SpatialPack(1, 4, 4, 1, 1, True)
+    # raise ValueError("cannot decide default schedule for workload: {}".format(wkl))
+
 @_get_schedule.register("rasp")
 def _get_schedule_conv2d(wkl):
     if wkl not in _WORKLOADS:
-        raise ValueError("no schedule for such workload: {}".format(wkl))
+        return _get_default_schedule(wkl)
+        # raise ValueError("no schedule for such workload: {}".format(wkl))
     idx = _WORKLOADS.index(wkl)
     sch = _SCHEDULES[idx]
     return sch
@@ -80,8 +91,12 @@ def _declaration_conv2d(data, kernel, stride, padding, layout, out_dtype):
     assert layout == 'NCHW', "only support NCHW convolution on rasp"
     assert data.shape[0].value == 1, "only support batch size=1 convolution on rasp"
     wkl = _get_workload(data, kernel, stride, padding, out_dtype)
-    sch = _get_schedule(wkl)
-    return _SCH_TO_DECL_FUNC[type(sch)](data, kernel, stride, padding, out_dtype)
+    try:
+        sch = _get_schedule(wkl)
+        return _SCH_TO_DECL_FUNC[type(sch)](data, kernel, stride, padding, out_dtype)
+    except ValueError:
+        return _SCH_TO_DECL_FUNC[SpatialPack](data, kernel, stride, padding, out_dtype)
+
 
 
 def _schedule_spatial_conv2d(s, data, data_pad, data_vec,

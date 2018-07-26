@@ -15,8 +15,8 @@ from topi import tag
 import scipy.stats.mstats
 import collections
 
-target = 'llvm -mcpu=core-avx2'
-
+target = tvm.target.create('llvm -mcpu=core-avx2')
+ctx = tvm.context('llvm -mcpu=core-avx2', 0)
 BITCODE_PATHS = [
     "tensorize/gemm__avx2.bc"
 ]
@@ -471,11 +471,11 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         return a_np, w_np, b_np
     a_np, w_np, b_np = get_ref_data()
 
-    def check_device(device):
-        if not tvm.module.enabled(device):
-            print("Skip because %s is not enabled" % device)
-            return
-        with tvm.target.create(device):
+    def check_device():
+        # if not tvm.module.enabled(device):
+        #     print("Skip because %s is not enabled" % device)
+        #     return
+        with target:
             A_NCHW = tvm.placeholder((batch, in_channel, in_height, in_width), name='A_NCHW')
             W_NCHW = tvm.placeholder((num_filter, in_channel, kernel, kernel), name='W_NCHW')
             dW = W
@@ -498,7 +498,6 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
             s = topi.generic.schedule_conv2d_nhwc([B])
             s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
             # print(tvm.lower(s_nchw, [A_NCHW, W_NCHW, B_NCHW], simple_mode=True))
-        ctx = tvm.context(device, 0)
         a = tvm.nd.array(a_np, ctx)
         a_nchw = tvm.nd.array(a_np.transpose(0, 3, 1, 2), ctx)
         w = tvm.nd.array(w_np, ctx)
@@ -509,11 +508,11 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         # b_tensor = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_nchw_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B_NCHW.shape), dtype=B.dtype), ctx)
-        func = tvm.build(s, [A, W, B], device)
-        func_nchw = tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], device)
+        func = tvm.build(s, [A, W, B], target)
+        func_nchw = tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], target)
         # func_tensor = tvm.build(s_tensor, [A, W, B_tensor], device)
-        func_tensor_mxn = tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], device)
-        func_nchw_tensor_mxn = tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], device)
+        func_tensor_mxn = tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], target)
+        func_nchw_tensor_mxn = tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], target)
         func(a, w, b)
         func_nchw(a_nchw, w_nchw, b_nchw)
         # func_tensor(a, w, b_tensor)
@@ -538,7 +537,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
         print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), gflops(evaluator_nchw), gflops(evaluator_tensor_mxn), gflops(evaluator_nchw_tensor_mxn)))
         return evaluator_nchw / evaluator_nchw_tensor_mxn
-    return check_device(target)
+    return check_device()
 
 
 

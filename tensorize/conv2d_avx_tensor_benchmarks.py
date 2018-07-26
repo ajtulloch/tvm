@@ -14,11 +14,11 @@ from topi import tag
 import scipy.stats.mstats
 import collections
 
-USE_RASP = True
+USE_RASP = False
 
 if not USE_RASP:
-    target = 'llvm -mcpu=core-avx2'
-    ctx = tvm.context(target, 0)
+    target = tvm.target.create('llvm -mcpu=core-avx2')
+    ctx = tvm.context('llvm -mcpu=core-avx2', 0)
 else:
     target = tvm.target.rasp()
     remote = tvm.rpc.connect('localhost', 9090)
@@ -471,7 +471,7 @@ X = True
 def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
     print("N: {}, CIn: {}, H/W: {}, COut: {}, KH/KW: {}".format(batch, in_channel, in_size, num_filter, kernel))
     in_height = in_width = in_size
-    kernel = 1
+    kernel = 2
     stride = 1
     padding = 0
     dilation = 1
@@ -547,7 +547,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
 
         func(a, w, b)
         print(tvm.lower(s_nchw, [A_NCHW, W_NCHW, B_NCHW], simple_mode=True))
-        import ipdb; ipdb.set_trace()
+        # print(a.shape, w.shape, b_tensor_mxn.shape)
         func_tensor_mxn(a, w, b_tensor_mxn)
 
         func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
@@ -598,7 +598,7 @@ def test_conv2d_nhwc():
     ]
 
     RESNET_18 = [
-        Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
+        # Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),

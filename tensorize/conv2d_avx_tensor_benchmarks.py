@@ -1,10 +1,10 @@
-
 """Example code to do convolution."""
 
 """Example code to do convolution."""
 import os
 import numpy as np
 import tvm
+import tvm.rpc
 import topi
 import topi.testing
 from tvm.contrib.pickle_memoize import memoize
@@ -15,26 +15,44 @@ from topi import tag
 import scipy.stats.mstats
 import collections
 
-target = tvm.target.create('llvm -mcpu=core-avx2')
-ctx = tvm.context('llvm -mcpu=core-avx2', 0)
-BITCODE_PATHS = [
-    "tensorize/gemm__avx2.bc"
-]
+USE_RASP = False
+
+if USE_RASP:
+    target = tvm.target.rasp()
+    remote = tvm.rpc.connect('localhost', 9090)
+    ctx = remote.cpu(0)
+    BITCODE_PATHS = [
+        "tensorize/gemm__neon.bc"
+    ]
+    MTile = 6
+    MMTile = 6
+    NTile = 8
+    KTile = 256
+    ARCH = "neon"
+
+else:
+    target = tvm.target.create('llvm -mcpu=core-avx2')
+    ctx = tvm.context('llvm -mcpu=core-avx2', 0)
+    BITCODE_PATHS = [
+        "tensorize/gemm__avx2.bc"
+    ]
+
+    # We want to keep B micro-panel in cache.
+    # so MTile * KTile + NTile * MTile + KTile * NTile elements should fit in L1.
+    # Therefore, KTile = 256
+
+    MTile = 4
+    MMTile = 4
+    NTile = 24
+    KTile = 256
+    ARCH = "avx2"
+
 
 @tvm.register_func("tvm_callback_llvm_bitcode_path")
 def bitcode_paths():
     global BITCODE_PATHS
     return BITCODE_PATHS
 
-
-# We want to keep B micro-panel in cache.
-# so MTile * KTile + NTile * MTile + KTile * NTile elements should fit in L1.
-# Therefore, KTile = 256
-
-MTile = 4
-MMTile = 4
-NTile = 24
-KTile = 256
 
 # Tensorized
 def intrin_gemm(M, N, K):
@@ -68,7 +86,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_compute_4x24__avx2",
+                "sgemm_compute_{MTile}x{NTile}__{ARCH}".format(**globals()),
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -84,7 +102,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_reset_4x24__avx2",
+                "sgemm_reset_{MTile}x{NTile}__{ARCH}".format(**globals()),
                 irb.buffer_ptr(cc),
                 cc.elem_offset,
                 cc.strides[0])
@@ -95,7 +113,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_update_4x24__avx2",
+                "sgemm_update_{MTile}x{NTile}__{ARCH}".format(**globals()),
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -454,7 +472,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
     in_height = in_width = in_size
     # kernel = 1
     # stride = 1
-    # padding = 0
+    padding = 0
     dilation = 1
     A = tvm.placeholder((batch, in_height, in_width, in_channel), name='A')
     W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W')
@@ -565,6 +583,7 @@ def test_conv2d_nhwc():
     ]
 
     RESNET_18 = [
+        Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),

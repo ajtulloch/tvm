@@ -27,7 +27,7 @@ if USE_RASP:
     MTile = 6
     MMTile = 6
     NTile = 8
-    KTile = 1024
+    KTile = 256
     ARCH = "neon"
 
 else:

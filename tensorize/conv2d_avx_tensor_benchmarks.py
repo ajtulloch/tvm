@@ -1,59 +1,40 @@
+
+"""Example code to do convolution."""
+
 """Example code to do convolution."""
 import os
 import numpy as np
 import tvm
-import tvm.rpc
 import topi
 import topi.testing
 from tvm.contrib.pickle_memoize import memoize
 from topi.util import get_const_tuple, get_const_int
-from tvm.contrib import util
 from topi.nn.pad import pad
 
 from topi import tag
 import scipy.stats.mstats
 import collections
 
-USE_RASP = False
+target = 'llvm -mcpu=core-avx2'
 
-if not USE_RASP:
-    target = tvm.target.create('llvm -mcpu=core-avx2')
-    ctx = tvm.context('llvm -mcpu=core-avx2', 0)
-else:
-    target = tvm.target.rasp()
-    remote = tvm.rpc.connect('localhost', 9090)
-    ctx = remote.cpu(0)
-
-AVX2_BITCODE_PATHS = [
-    "tensorize/gemm__avx2.bc",
-]
-
-NEON_BITCODE_PATHS = [
-    "tensorize/gemm__neon.bc"
+BITCODE_PATHS = [
+    "tensorize/gemm__avx2.bc"
 ]
 
 @tvm.register_func("tvm_callback_llvm_bitcode_path")
 def bitcode_paths():
-    if USE_RASP:
-        return NEON_BITCODE_PATHS
-    else:
-        return AVX2_BITCODE_PATHS
+    global BITCODE_PATHS
+    return BITCODE_PATHS
+
 
 # We want to keep B micro-panel in cache.
 # so MTile * KTile + NTile * MTile + KTile * NTile elements should fit in L1.
 # Therefore, KTile = 256
 
-if USE_RASP:
-
-    MTile = 6
-    MMTile = 6
-    NTile = 8
-    KTile = 256
-else:
-    MTile = 4
-    MMTile = 4
-    NTile = 8
-    KTile = 256
+MTile = 4
+MMTile = 4
+NTile = 24
+KTile = 256
 
 # Tensorized
 def intrin_gemm(M, N, K):
@@ -87,7 +68,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_compute_6x8__neon" if USE_RASP else "sgemm_compute_4x24__avx2",
+                "sgemm_compute_4x24__avx2",
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -103,7 +84,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_reset_6x8__neon" if USE_RASP else "sgemm_reset_4x24__avx2",
+                "sgemm_reset_4x24__avx2",
                 irb.buffer_ptr(cc),
                 cc.elem_offset,
                 cc.strides[0])
@@ -114,7 +95,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_update_6x8__neon" if USE_RASP else "sgemm_update_4x24__avx2",
+                "sgemm_update_4x24__avx2",
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -471,9 +452,9 @@ X = True
 def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
     print("N: {}, CIn: {}, H/W: {}, COut: {}, KH/KW: {}".format(batch, in_channel, in_size, num_filter, kernel))
     in_height = in_width = in_size
-    kernel = 2
-    stride = 1
-    padding = 0
+    # kernel = 1
+    # stride = 1
+    # padding = 0
     dilation = 1
     A = tvm.placeholder((batch, in_height, in_width, in_channel), name='A')
     W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W')
@@ -490,11 +471,11 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         return a_np, w_np, b_np
     a_np, w_np, b_np = get_ref_data()
 
-    def check_device(target):
-        # if not tvm.module.enabled(device):
-        #     print("Skip because %s is not enabled" % device)
-        #     return
-        with target:
+    def check_device(device):
+        if not tvm.module.enabled(device):
+            print("Skip because %s is not enabled" % device)
+            return
+        with tvm.target.create(device):
             A_NCHW = tvm.placeholder((batch, in_channel, in_height, in_width), name='A_NCHW')
             W_NCHW = tvm.placeholder((num_filter, in_channel, kernel, kernel), name='W_NCHW')
             dW = W
@@ -517,6 +498,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
             s = topi.generic.schedule_conv2d_nhwc([B])
             s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
             # print(tvm.lower(s_nchw, [A_NCHW, W_NCHW, B_NCHW], simple_mode=True))
+        ctx = tvm.context(device, 0)
         a = tvm.nd.array(a_np, ctx)
         a_nchw = tvm.nd.array(a_np.transpose(0, 3, 1, 2), ctx)
         w = tvm.nd.array(w_np, ctx)
@@ -527,29 +509,15 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         # b_tensor = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_nchw_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B_NCHW.shape), dtype=B.dtype), ctx)
-
-        def remote_func(func):
-            if USE_RASP:
-                temp = util.tempdir()
-                path_lib = temp.relpath("deploy_lib_rasp.o")
-                func.save(path_lib)
-                remote.upload(path_lib)
-                return remote.load_module('deploy_lib_rasp.o')
-            else:
-                return func
-
-        func = remote_func(tvm.build(s, [A, W, B], target))
-
-        func_nchw = remote_func(tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], target))
+        func = tvm.build(s, [A, W, B], device)
+        func_nchw = tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], device)
         # func_tensor = tvm.build(s_tensor, [A, W, B_tensor], device)
-        func_tensor_mxn = remote_func(tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], target))
-        func_nchw_tensor_mxn = remote_func(tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], target))
-
+        func_tensor_mxn = tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], device)
+        func_nchw_tensor_mxn = tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], device)
         func(a, w, b)
-        print(tvm.lower(s_nchw, [A_NCHW, W_NCHW, B_NCHW], simple_mode=True))
-        # print(a.shape, w.shape, b_tensor_mxn.shape)
+        func_nchw(a_nchw, w_nchw, b_nchw)
+        # func_tensor(a, w, b_tensor)
         func_tensor_mxn(a, w, b_tensor_mxn)
-
         func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
         np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
         np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
@@ -598,7 +566,6 @@ def test_conv2d_nhwc():
     ]
 
     RESNET_18 = [
-        # Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
         Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),

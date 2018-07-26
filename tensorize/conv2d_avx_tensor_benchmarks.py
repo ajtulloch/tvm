@@ -10,12 +10,12 @@ import topi.testing
 from tvm.contrib.pickle_memoize import memoize
 from topi.util import get_const_tuple, get_const_int
 from topi.nn.pad import pad
-
+from tvm.contrib import util
 from topi import tag
 import scipy.stats.mstats
 import collections
 
-USE_RASP = False
+USE_RASP = True
 
 if USE_RASP:
     target = tvm.target.rasp()
@@ -510,6 +510,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
             global X
             if X:
                 print(tvm.lower(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], simple_mode=True))
+                print(tvm.lower(s_tensor_mxn, [A, W, B_tensor_mxn], simple_mode=True))
             X = False
 
 
@@ -526,35 +527,52 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         # b_tensor = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B.shape), dtype=B.dtype), ctx)
         b_nchw_tensor_mxn = tvm.nd.array(np.zeros(get_const_tuple(B_NCHW.shape), dtype=B.dtype), ctx)
-        func = tvm.build(s, [A, W, B], target)
-        func_nchw = tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], target)
+
+        def remote_func(func, name):
+            if USE_RASP:
+                import uuid
+                tmp = util.tempdir()
+                name = name + ".o"
+                lib_fname = tmp.relpath(name)
+                func.save(lib_fname)
+                func.save(name + ".S", fmt="asm")
+                remote.upload(lib_fname)
+                return remote.load_module(name)
+            else:
+                return func
+
+        func = remote_func(tvm.build(s, [A, W, B], target),name="func")
+        func_nchw = remote_func(tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], target), name="func_nchw")
         # func_tensor = tvm.build(s_tensor, [A, W, B_tensor], device)
-        func_tensor_mxn = tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], target)
-        func_nchw_tensor_mxn = tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], target)
+        func_tensor_mxn = remote_func(tvm.build(s_tensor_mxn, [A, W, B_tensor_mxn], target), name="func_tensor_mxn")
+        func_nchw_tensor_mxn = remote_func(tvm.build(s_nchw_tensor_mxn, [A_NCHW, W_NCHW, B_NCHW_tensor_mxn], target), name="func_nchw_tensor_mxn")
+
         func(a, w, b)
-        func_nchw(a_nchw, w_nchw, b_nchw)
-        # func_tensor(a, w, b_tensor)
         func_tensor_mxn(a, w, b_tensor_mxn)
-        func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
+        # func_nchw(a_nchw, w_nchw, b_nchw)
         np.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
-        np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
-        np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
+        # np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
+
+
+        # func_nchw_tensor_mxn(a_nchw, w_nchw, b_nchw_tensor_mxn)
+
+        # np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
         np.testing.assert_allclose(b_tensor_mxn.asnumpy(), b_np, rtol=1e-5)
 
         (_, _, out_size, _) = get_const_tuple(B.shape)
         FLOPS = 2 * batch * in_channel * out_size * out_size * kernel * kernel * num_filter
-        REPEAT = 50
+        REPEAT = 5
 
         def gflops(t):
             return FLOPS / t / 1E9
         evaluator = func.time_evaluator(func.entry_name, ctx, number=REPEAT)(a, w, b).mean
-        evaluator_nchw = func_nchw.time_evaluator(func_nchw.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw).mean
+        # evaluator_nchw = func_nchw.time_evaluator(func_nchw.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw).mean
         # evaluator_tensor = func_tensor.time_evaluator(func_tensor.entry_name, ctx, number=REPEAT)
         evaluator_tensor_mxn = func_tensor_mxn.time_evaluator(func_tensor_mxn.entry_name, ctx, number=REPEAT)(a, w, b_tensor_mxn).mean
-        evaluator_nchw_tensor_mxn = func_nchw_tensor_mxn.time_evaluator(func_nchw_tensor_mxn.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw_tensor_mxn).mean
+        # evaluator_nchw_tensor_mxn = func_nchw_tensor_mxn.time_evaluator(func_nchw_tensor_mxn.entry_name, ctx, number=REPEAT)(a_nchw, w_nchw, b_nchw_tensor_mxn).mean
 
-        print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), gflops(evaluator_nchw), gflops(evaluator_tensor_mxn), gflops(evaluator_nchw_tensor_mxn)))
-        return evaluator_nchw / evaluator_nchw_tensor_mxn
+        print("BaselineNHWC: {:.2f}, BaselineNCHW: {:.2f}, TensorNHWC: {:.2f}, TensorNCHW: {:.2f}".format(gflops(evaluator), 0, gflops(evaluator_tensor_mxn), 0))
+        return evaluator / evaluator_tensor_mxn
     return check_device()
 
 

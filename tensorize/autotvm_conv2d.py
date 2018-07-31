@@ -230,37 +230,35 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
     yo, yi = cfg["tile_y"].apply(s, A_W_product, y)
     xii, xiii = s[A_W_product].split(xi, factor=MTile)
     yii, yiii = s[A_W_product].split(yi, factor=NTile)
-    tile_in_k = K >= 2 * KTile and MTileUnroll > 1 and cfg['tile_in_k']
+    tile_in_k = K >= 2 * KTile and MTileUnroll > 1 and cfg['tile_in_k'].val
     if tile_in_k:
         k, = A_W_product.op.reduce_axis
         ko, ki = s[A_W_product].split(k, factor=KTile)
         s[A_W_product].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
-        if cfg['A_tile_compute_location'] == 1:
+        if cfg['A_tile_compute_location'].val == 1:
             s[A_tile].compute_at(s[A_W_product], xo)
-        if cfg['A_tile_compute_location'] == 2:
+        if cfg['A_tile_compute_location'].val == 2:
             s[A_tile].compute_at(s[A_W_product], xii)
-        if cfg['A_tile_unroll'] == 1:
+        if cfg['A_tile_unroll'].val == 1:
             s[A_tile].unroll(A_tile.op.axis[2])
     else:
         s[A_W_product].reorder(yo, xo, yii, xii, xiii, yiii)
-        if cfg['A_tile_compute_location'] == 1:
+        if cfg['A_tile_compute_location'].val == 1:
             s[A_tile].compute_at(s[A_W_product], xo)
-        if cfg['A_tile_compute_location'] == 2:
+        if cfg['A_tile_compute_location'].val == 2:
             s[A_tile].compute_at(s[A_W_product], xii)
 
     s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile if tile_in_k else K))
     # s[A_W_product].unroll(xii)
     n, h, w, c = unpacked_nhwc.op.axis
-    print(cfg["output_fuse_or_tile"])
-    if cfg["output_fuse_or_tile"] == 0:
-        print(cfg["output_fuse_or_tile"])
+    if cfg["output_fuse_or_tile"].val == 0:
         fused = s[unpacked_nhwc].fuse(n, h, w)
-        if cfg["output_vectorize"]:
+        if cfg["output_vectorize"].val:
             s[unpacked_nhwc].vectorize(c)
-    if cfg["output_fuse_or_tile"] == 1:
+    if cfg["output_fuse_or_tile"].val == 1:
         nh = s[unpacked_nhwc].fuse(n, h)
         (nho, wo, nhi, wi) = s[unpacked_nhwc].tile(nh, w, 8, 8)
-        if cfg["output_vectorize"]:
+        if cfg["output_vectorize"].val:
             s[unpacked_nhwc].vectorize(c)
     # print(tvm.lower(s, [A, W_tile, unpacked_nhwc], simple_mode=True))
     return s, [A, W_tile, unpacked_nhwc]
@@ -285,7 +283,7 @@ measure_option = autotvm.measure_option(mode='rpc',
 # tuner.tune(n_trial=200,
 #            measure_option=measure_option,
 #            callbacks=[autotvm.callback.log_to_file('matmul.log')])
-tuner = autotvm.tuner.XGBTuner(task)
+tuner = autotvm.tuner.XGBTuner(task, feature_type='knob')
 tuner.tune(n_trial=1000,
            measure_option=measure_option,
            callbacks=[autotvm.callback.log_to_file('conv2d_xgb.log')])

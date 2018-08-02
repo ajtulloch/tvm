@@ -266,28 +266,49 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
 S = 26
 K = 3
 C = 256
-task = autotvm.task.create(conv2d, args=(S, S, K, K, C, C, 'float32'), target=tvm.target.rasp())
-print(task.config_space)
+import collections
 
-# logging config (for printing tuning log to screen)
-logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+Workload = collections.namedtuple("Workload", ["space", "input_channel", "output_channel", "kernel", "pad", "stride"])
+WORKLOADS = [
+        Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
+        Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
+        Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
+        Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
+        Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
+        Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
+        Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
+        Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
+        Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
+        Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
+        Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
+]
 
-# use local cpu, measure 5 times for every config to reduce variance
-measure_option = autotvm.measure_option(mode='rpc',
-                                        rpc_tracker_addr=('localhost', 9190),
-                                        rpc_device_key="rpi",
-                                        number=3)
+for i, w in enumerate(WORKLOADS):
+    task = autotvm.task.create(
+        conv2d,
+        args=(w.space, w.space, w.kernel, w.kernel, w.input_channel, w.output_channel, 'float32'),
+        target=tvm.target.rasp())
+    print(task.config_space)
 
-# # begin tuning, log records to file `matmul.log`
-# tuner = autotvm.tuner.RandomTuner(task)
-# tuner.tune(n_trial=200,
-#            measure_option=measure_option,
-#            callbacks=[autotvm.callback.log_to_file('matmul.log')])
-tuner = autotvm.tuner.XGBTuner(task, feature_type='knob')
-tuner.tune(n_trial=1000,
-           measure_option=measure_option,
-           callbacks=[autotvm.callback.log_to_file('conv2d_xgb.log')])
+    # logging config (for printing tuning log to screen)
+    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
 
+    # use local cpu, measure 5 times for every config to reduce variance
+    measure_option = autotvm.measure_option(mode='rpc',
+                                            rpc_tracker_addr=('localhost', 9190),
+                                            rpc_device_key="rpi",
+                                            number=3)
+
+    # # begin tuning, log records to file `matmul.log`
+    # tuner = autotvm.tuner.RandomTuner(task)
+    # tuner.tune(n_trial=200,
+    #            measure_option=measure_option,
+    #            callbacks=[autotvm.callback.log_to_file('matmul.log')])
+    tuner = autotvm.tuner.XGBTuner(task, feature_type='knob')
+    tuner.tune(n_trial=100,
+               measure_option=measure_option,
+               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
 
 
 # # apply history best from log file

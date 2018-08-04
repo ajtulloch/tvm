@@ -139,10 +139,10 @@ def _schedule_winograd(cfg, s, output, last):
     eps, nu, b, c, bb = s[V].op.axis
     r_eps, r_nu = s[V].op.reduce_axis
     s[V].reorder(b, c, eps, nu, r_eps, r_nu, bb)
-    s[V].unroll(eps)
-    s[V].unroll(nu)
-    s[V].unroll(r_eps)
-    s[V].unroll(r_nu)
+    # s[V].unroll(eps)
+    # s[V].unroll(nu)
+    # s[V].unroll(r_eps)
+    # s[V].unroll(r_nu)
     s[DD].compute_at(s[V], c)
     s[V].vectorize(bb)
     s[V].parallel(b)
@@ -158,7 +158,7 @@ def _schedule_winograd(cfg, s, output, last):
     cfg.define_annotate('ann_spatial', [k, xi], policy='try_unroll_vec')
     cfg['ann_reduce'].apply(s, M, [ci],
                             axis_lens=[cfg['tile_c'].size[-1]],
-                            max_unroll=16,
+                            max_unroll=1,
                             cfg=cfg)
     cfg['ann_spatial'].apply(s, M, [k, xi])
 
@@ -166,10 +166,10 @@ def _schedule_winograd(cfg, s, output, last):
     s[A].compute_inline()
     k, b, vh, vw = s[Y].op.axis
     r_eps, r_nu = s[Y].op.reduce_axis
-    s[Y].unroll(vh)
-    s[Y].unroll(vw)
-    s[Y].unroll(r_eps)
-    s[Y].unroll(r_nu)
+    # s[Y].unroll(vh)
+    # s[Y].unroll(vw)
+    # s[Y].unroll(r_eps)
+    # s[Y].unroll(r_nu)
 
     # output
     n, co, h, w = s[last].op.axis
@@ -318,13 +318,15 @@ def _decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, tile_
 
 
 @autotvm.template
-def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
+def conv2d_winograd_tensor(IH, IW, KH, KW, CIn, COut, dtype):
     cfg = autotvm.get_config()
     A = tvm.placeholder((1, IH, IW, CIn), dtype=dtype, name="A")
     W = tvm.placeholder((COut, CIn, KH, KW), dtype=dtype, name="W")
     U, Y = _decl_winograd(cfg, A, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", tile_size=4)
     s = tvm.create_schedule(Y.op)
     _schedule_winograd(cfg, s, Y, Y)
+    print(tvm.lower(s, [A, U, Y], simple_mode=True))
+    raise 
     return s, [A, U, Y]
 
 import collections
@@ -332,22 +334,22 @@ import collections
 Workload = collections.namedtuple("Workload", ["space", "input_channel", "output_channel", "kernel", "pad", "stride"])
 WORKLOADS = [
         Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
-        Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
-        Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
-        Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
-        Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
-        Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
+        # Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
+        # Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
+        # Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
+        # Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
+        # Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
+        # Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
+        # Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
+        # Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
+        # Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
+        # Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
+        # Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
 ]
 
 for i, w in enumerate(WORKLOADS):
     task = autotvm.task.create(
-        conv2d,
+        conv2d_winograd_tensor,
         args=(w.space, w.space, w.kernel, w.kernel, w.input_channel, w.output_channel, 'float32'),
         target=tvm.target.rasp())
     print(task.config_space)

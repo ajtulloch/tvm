@@ -219,8 +219,8 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
 
     (x, y) = A_W_product.op.axis
     cfg = autotvm.get_config()
-    cfg.define_split("tile_x", x, num_outputs=2, policy='candidate', candidate=x_candidates)
-    cfg.define_split("tile_y", y, num_outputs=2, policy='candidate', candidate=y_candidates)
+    cfg.define_split("tile_x", cfg.axis(x), num_outputs=2, policy='candidate', candidate=x_candidates)
+    cfg.define_split("tile_y", cfg.axis(y), num_outputs=2, policy='candidate', candidate=y_candidates)
     cfg.define_knob("tile_in_k", [0, 1])
     cfg.define_knob("A_tile_compute_location", [0, 1, 2, 3])
     cfg.define_knob("A_tile_unroll", [0, 1])
@@ -231,10 +231,23 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
     xii, xiii = s[A_W_product].split(xi, factor=MTile)
     yii, yiii = s[A_W_product].split(yi, factor=NTile)
     tile_in_k = K >= 2 * KTile and MTileUnroll > 1 and cfg['tile_in_k'].val
+
+    def reorder_apply(self_, sch, op, axes, extra_axes):
+        if len(axes) == len(self_.perm):
+            new_order = [axes[i] for i in self_.perm]
+        else:
+            new_order = [axes[i] for i in self_.perm if i < len(axes)]
+        new_order += extra_axes
+        sch[op].reorder(*new_order)
+        return new_order
+    cfg.define_reorder("A_W_reorder_k", [xo, xii, yo, yii, ko], policy="all")
+    cfg.define_reorder("A_W_reorder_no_k", [xo, xi, yo, yi], policy="all")
     if tile_in_k:
+
         k, = A_W_product.op.reduce_axis
         ko, ki = s[A_W_product].split(k, factor=KTile)
-        s[A_W_product].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
+        reorder_apply(cfg["A_W_reorder_k"], s, A_W_product, [xo, xii, yo, yii, ko], extra_axes=[xiii, yiii, ki])
+        # s[A_W_product].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
         if cfg['A_tile_compute_location'].val == 1:
             s[A_tile].compute_at(s[A_W_product], xo)
         if cfg['A_tile_compute_location'].val == 2:
@@ -242,7 +255,8 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
         if cfg['A_tile_unroll'].val == 1:
             s[A_tile].unroll(A_tile.op.axis[2])
     else:
-        s[A_W_product].reorder(yo, xo, yii, xii, xiii, yiii)
+        reorder_apply(cfg["A_W_reorder_no_k"], s, A_W_product, [xo, xii, yo, yii], extra_axes=[xiii, yiii])
+        # s[A_W_product].reorder(yo, xo, yii, xii, xiii, yiii)
         if cfg['A_tile_compute_location'].val == 1:
             s[A_tile].compute_at(s[A_W_product], xo)
         if cfg['A_tile_compute_location'].val == 2:
@@ -261,89 +275,8 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
         if cfg["output_vectorize"].val:
             s[unpacked_nhwc].vectorize(c)
     # print(tvm.lower(s, [A, W_tile, unpacked_nhwc], simple_mode=True))
+    cfg.add_flop(2 * 1 * CIn * get_const_int(unpacked_nhwc.shape[1]) * get_const_int(unpacked_nhwc.shape[2]) * KH * KW * COut)
     return s, [A, W_tile, unpacked_nhwc]
-
-def _decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype, num_tile=2):
-    assert layout == "NCHW", "Only support NCHW"
-    out_dtype = out_dtype or data.dtype
-
-    _, CI, IH, IW = get_const_tuple(data.shape)
-    if len(kernel.shape) == 4:
-        pre_packed = False
-        CO, _, KH, KW = get_const_tuple(kernel.shape)
-    else:  # kernel tensor is pre packed
-        pre_packed = True
-        CO, _, KH, KW, VC = get_const_tuple(kernel.shape)
-        CO = CO * VC
-
-    pad_top, pad_left, pad_down, pad_right = get_pad_tuple(padding, (KH, KW))
-    HSTR, WSTR = strides if isinstance(strides, (tuple, list)) else (strides, strides)
-
-    N = 1
-    OH = (IH + pad_top + pad_down - KH) // HSTR + 1
-    OW = (IW + pad_left + pad_right - KW) // WSTR + 1
-    data_pad = pad(data, [0, 0, pad_top, pad_left], [0, 0, pad_down, pad_right])
-
-    # ==================== define configuration space ====================
-    n, co, oh, ow = cfg.axis(N), cfg.axis(CO), cfg.axis(OH), cfg.axis(OW)
-    ci, kh, kw = cfg.reduce_axis(CI), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
-
-    if num_tile == 2:     # for arm cpu
-        co, vc = cfg.define_split('tile_co', co, num_outputs=2)
-        oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2)
-        ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2)
-    elif num_tile == 3:   # for mali gpu
-        co, _, vc = cfg.define_split('tile_co', co, num_outputs=3)
-        oh, _, vh = cfg.define_split('tile_oh', oh, num_outputs=3)
-        ow, _, vw = cfg.define_split('tile_ow', ow, num_outputs=3)
-    else:
-        raise RuntimeError("Invalid num_tile")
-
-    cfg.define_reorder("reorder_0",
-                       [n, co, oh, ow, ci, kh, kw, vh, vw, vc],
-                       policy='candidate', candidate=[
-                           [n, co, oh, ow, ci, kh, kw, vh, vw, vc],
-                           [n, co, oh, ow, ci, kh, kw, vc, vh, vw]])
-
-    cfg.define_annotate("ann_reduce", [kh, kw], policy='try_unroll')
-    cfg.define_annotate("ann_spatial", [vh, vw, vc], policy='try_unroll_vec')
-    # ====================================================================
-
-    VC = cfg["tile_co"].size[-1]
-    VH = cfg["tile_oh"].size[-1]
-    VW = cfg["tile_ow"].size[-1]
-
-    dvshape = (N, OH // VH, OW // VW, CI, VH*HSTR + KH-1, VW*WSTR + KW-1)
-    kvshape = (CO // VC, CI, KH, KW, VC)
-    ovshape = (N, CO // VC, OH // VH, OW // VW, VH, VW, VC)
-    oshape = (N, CO, OH, OW)
-
-    data_vec = tvm.compute(dvshape, lambda n, h, w, ci, vh, vw:
-                           data_pad[n][ci][h*VH*HSTR+vh][w*VW*WSTR+vw],
-                           name='data_vec')
-
-    if pre_packed:
-        kernel_vec = kernel
-    else:
-        kernel_vec = tvm.compute(kvshape, lambda co, ci, kh, kw, vc:
-                                 kernel[co*VC+vc][ci][kh][kw],
-                                 name='kernel_vec')
-
-    ci = tvm.reduce_axis((0, CI), name='ci')
-    kh = tvm.reduce_axis((0, KH), name='kh')
-    kw = tvm.reduce_axis((0, KW), name='kw')
-
-    conv = tvm.compute(ovshape, lambda n, co, h, w, vh, vw, vc: \
-        tvm.sum(data_vec[n, h, w, ci, vh*HSTR+kh, vw*WSTR+kw].astype(out_dtype) *
-                kernel_vec[co, ci, kh, kw, vc].astype(out_dtype),
-                axis=[ci, kh, kw]), name='conv')
-
-    output = tvm.compute(oshape, lambda n, co, h, w:
-                         conv[n][co//VC][h//VH][w//VW][h%VH][w%VW][co%VC],
-                         name='output_unpack', tag='spatial_conv_output',
-                         attrs={'workload': _conv_arg_to_workload(data, kernel, strides, padding,
-                                                                  layout, out_dtype)})
-    return output
 
 S = 26
 K = 3
@@ -374,13 +307,12 @@ for i, w in enumerate(WORKLOADS):
     print(task.config_space)
 
     # logging config (for printing tuning log to screen)
-    logging.basicConfig(level=logging.INFO, stream=sys.stdout)
+    logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
     # use local cpu, measure 5 times for every config to reduce variance
-    measure_option = autotvm.measure_option(mode='rpc',
-                                            rpc_tracker_addr=('localhost', 9190),
-                                            rpc_device_key="rpi",
-                                            number=3)
+    measure_option = autotvm.measure_option(
+        measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
+        number=3)
 
     # # begin tuning, log records to file `matmul.log`
     # tuner = autotvm.tuner.RandomTuner(task)
@@ -388,9 +320,9 @@ for i, w in enumerate(WORKLOADS):
     #            measure_option=measure_option,
     #            callbacks=[autotvm.callback.log_to_file('matmul.log')])
     tuner = autotvm.tuner.XGBTuner(task, feature_type='knob')
-    tuner.tune(n_trial=100,
+    tuner.tune(n_trial=200,
                measure_option=measure_option,
-               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
+               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation_tensor_reorder_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
 
 
 # # apply history best from log file

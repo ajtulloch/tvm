@@ -246,6 +246,36 @@ def _decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, tile_
             [1, 1],
             [1, -1],
             [0, -1]], out_dtype)
+    elif tile_size == 6:
+        A_data = np.array([[1,  1,  1,   1,    1,    1,      1,    0],
+                      [0,  1,  -1,  2,   -2,   1/2,   -1/2,   0],
+                      [0,  1,  1,   4,    4,   1/4,    1/4,   0],
+                      [0,  1,  -1,  8,   -8,   1/8,   -1/8,   0],
+                      [0,  1,  1,   16,  16,   1/16,  1/16,   0],
+                      [0,  1,  -1,  32,  -32,  1/32,  -1/32,  1]],
+                     dtype=np.float32).T
+        G_data = np.array([[1,      0,     0],
+                      [-2/9,  -2/9,   -2/9],
+                      [-2/9,   2/9,   -2/9],
+                      [1/90,  1/45,   2/45],
+                      [1/90,  -1/45,  2/45],
+                      [32/45,    16/46, 8/45],
+                      [32/45,   -16/45, 8/45],
+                      [0,      0,     1]],
+                     dtype=np.float32)
+        B_data = np.array([[1,   0,    -21/4,    0,    21/4,     0,    -1,  0],
+                      [0,   1,      1,    -17/4,  -17/4,    1,    1,   0],
+                      [0,   -1,     1,    17/4,   -17/4,   -1,    1,   0],
+                      [0,  1/2,    1/4,   -5/2,   -5/4,     2,    1,   0],
+                      [0,  -1/2,   1/4,    5/2,   -5/4,    -2,    1,   0],
+                      [0,   2,      4,    -5/2,    -5,     1/2,   1,   0],
+                      [0,   -2,     4,     5/2,    -5,    -1/2,   1,   0],
+                      [0,   -1,     0,    21/4,     0,    -21/4,  0,   1]],
+                     dtype=np.float32).T
+
+        assert G_data.shape == (8, 3)
+        assert A_data.shape == (8, 6)
+        assert B_data.shape == (8, 8)
     else:
         raise ValueError("Unsupported tile size for winograd: " + str(tile_size))
 
@@ -322,7 +352,7 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
     cfg = autotvm.get_config()
     A = tvm.placeholder((1, IH, IW, CIn), dtype=dtype, name="A")
     W = tvm.placeholder((COut, CIn, KH, KW), dtype=dtype, name="W")
-    U, Y = _decl_winograd(cfg, A, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", tile_size=4)
+    U, Y = _decl_winograd(cfg, A, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", tile_size=6)
     s = tvm.create_schedule(Y.op)
     _schedule_winograd(cfg, s, Y, Y)
     return s, [A, U, Y]
@@ -357,15 +387,16 @@ for i, w in enumerate(WORKLOADS):
 
     measure_option = autotvm.measure_option(
         measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
-        number=3)
+        number=3,
+        parallel_num=5)
 
     # # begin tuning, log records to file `matmul.log`
     # tuner = autotvm.tuner.RandomTuner(task)
     # tuner.tune(n_trial=200,
     #            measure_option=measure_option,
     #            callbacks=[autotvm.callback.log_to_file('matmul.log')])
-    tuner = autotvm.tuner.XGBTuner(task, feature_type='knob')
-    tuner.tune(n_trial=100,
+    tuner = autotvm.tuner.XGBTuner(task)
+    tuner.tune(n_trial=500,
                measure_option=measure_option,
                callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation__winograd_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
 

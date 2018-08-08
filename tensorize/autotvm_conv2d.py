@@ -231,6 +231,8 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
     xii, xiii = s[A_W_product].split(xi, factor=MTile)
     yii, yiii = s[A_W_product].split(yi, factor=NTile)
     tile_in_k = K >= 2 * KTile and MTileUnroll > 1 and cfg['tile_in_k'].val
+    k, = A_W_product.op.reduce_axis
+    ko, ki = s[A_W_product].split(k, factor=KTile if tile_in_k else K)
 
     def reorder_apply(self_, sch, op, axes, extra_axes):
         if len(axes) == len(self_.perm):
@@ -241,26 +243,13 @@ def conv2d(IH, IW, KH, KW, CIn, COut, dtype):
         sch[op].reorder(*new_order)
         return new_order
     cfg.define_reorder("A_W_reorder_k", [xo, xii, yo, yii, ko], policy="all")
-    cfg.define_reorder("A_W_reorder_no_k", [xo, xi, yo, yi], policy="all")
-    if tile_in_k:
-
-        k, = A_W_product.op.reduce_axis
-        ko, ki = s[A_W_product].split(k, factor=KTile)
-        reorder_apply(cfg["A_W_reorder_k"], s, A_W_product, [xo, xii, yo, yii, ko], extra_axes=[xiii, yiii, ki])
-        # s[A_W_product].reorder(yo, xo, ko, yii, xii, xiii, yiii, ki)
-        if cfg['A_tile_compute_location'].val == 1:
-            s[A_tile].compute_at(s[A_W_product], xo)
-        if cfg['A_tile_compute_location'].val == 2:
-            s[A_tile].compute_at(s[A_W_product], xii)
-        if cfg['A_tile_unroll'].val == 1:
-            s[A_tile].unroll(A_tile.op.axis[2])
-    else:
-        reorder_apply(cfg["A_W_reorder_no_k"], s, A_W_product, [xo, xii, yo, yii], extra_axes=[xiii, yiii])
-        # s[A_W_product].reorder(yo, xo, yii, xii, xiii, yiii)
-        if cfg['A_tile_compute_location'].val == 1:
-            s[A_tile].compute_at(s[A_W_product], xo)
-        if cfg['A_tile_compute_location'].val == 2:
-            s[A_tile].compute_at(s[A_W_product], xii)
+    reorder_apply(cfg["A_W_reorder_k"], s, A_W_product, [xo, xii, yo, yii, ko], extra_axes=[xiii, yiii, ki])
+    if cfg['A_tile_compute_location'].val == 1:
+        s[A_tile].compute_at(s[A_W_product], xo)
+    if cfg['A_tile_compute_location'].val == 2:
+        s[A_tile].compute_at(s[A_W_product], xii)
+    if cfg['A_tile_unroll'].val == 1:
+        s[A_tile].unroll(A_tile.op.axis[2])
 
     s[A_W_product].tensorize(xiii, intrin_gemm(M=MTile, N=NTile, K=KTile if tile_in_k else K))
     # s[A_W_product].unroll(xii)
@@ -312,6 +301,7 @@ for i, w in enumerate(WORKLOADS):
     # use local cpu, measure 5 times for every config to reduce variance
     measure_option = autotvm.measure_option(
         measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
+        parallel_num=5,
         number=3)
 
     # # begin tuning, log records to file `matmul.log`
@@ -320,9 +310,9 @@ for i, w in enumerate(WORKLOADS):
     #            measure_option=measure_option,
     #            callbacks=[autotvm.callback.log_to_file('matmul.log')])
     tuner = autotvm.tuner.XGBTuner(task, feature_type='knob')
-    tuner.tune(n_trial=200,
+    tuner.tune(n_trial=800,
                measure_option=measure_option,
-               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation_tensor_reorder_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
+               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation_tensor_reorder_full_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
 
 
 # # apply history best from log file

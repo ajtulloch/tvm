@@ -69,10 +69,10 @@ class RPCDeviceAPI final : public DeviceAPI {
           to, to_offset, size, ctx_from, type_hint);
     } else if (from_dev_type == kDLCPU &&
                to_dev_type > kRPCSessMask) {
-      GetSess(ctx_to)->CopyToRemote(
-          (void*)from, from_offset,  // NOLINT(*)
-          static_cast<const RemoteSpace*>(to)->data, to_offset,
-          size, ctx_to, type_hint);
+      // GetSess(ctx_to)->CopyToRemote(
+      //     (void*)from, from_offset,  // NOLINT(*)
+      //     static_cast<const RemoteSpace*>(to)->data, to_offset,
+      //     size, ctx_to, type_hint);
     } else {
       LOG(FATAL) << "expect copy from/to remote or between remote";
     }

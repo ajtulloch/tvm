@@ -147,10 +147,10 @@ def _schedule_winograd(s, output, last):
     data_pad = d.op.input_tensors[0]
 
     # padding
-    s[data_pad].compute_inline()
+    # s[data_pad].compute_inline()
 
     # pack input tiles
-    s[d].compute_inline()
+    # s[d].compute_inline()
 
     # transform kernel
     if isinstance(U.op, tvm.tensor.ComputeOp):
@@ -173,18 +173,18 @@ def _schedule_winograd(s, output, last):
             # s[U].parallel(k)
 
     # transform image
-    DD = s.cache_read(d, 'global', [V])
-    s[B].compute_inline()
+    # DD = s.cache_read(d, 'global', [V])
+    # s[B].compute_inline()
     eps, nu, b, c, bb = s[V].op.axis
     r_eps, r_nu = s[V].op.reduce_axis
-    s[V].reorder(b, c, eps, nu, r_eps, r_nu, bb)
+    # s[V].reorder(b, c, eps, nu, r_eps, r_nu, bb)
     # s[V].unroll(eps)
     # s[V].unroll(nu)
     # s[V].unroll(r_eps)
     # s[V].unroll(r_nu)
-    s[DD].compute_at(s[V], c)
-    s[V].vectorize(bb)
-    s[V].parallel(b)
+    # s[DD].compute_at(s[V], c)
+    # s[V].vectorize(bb)
+    # s[V].parallel(b)
 
     # batch gemm
     eps, nu, b, k = s[M].op.axis
@@ -204,7 +204,7 @@ def _schedule_winograd(s, output, last):
     (ko, ki) = s[M].split(k, factor=NTile)
     (bo, bi) = s[M].split(b, factor=MTile)
     s[M].reorder(eps, nu, bo, ko, bi, ki)
-    s[M].tensorize(bi, intrin_gemm(M=MTile, N=NTile, K=get_const_int(c.dom.extent)))
+    # s[M].tensorize(bi, intrin_gemm(M=MTile, N=NTile, K=get_const_int(c.dom.extent)))
     # inverse transform
     s[A].compute_inline()
     k, b, vh, vw = s[Y].op.axis
@@ -216,19 +216,19 @@ def _schedule_winograd(s, output, last):
 
     # output
     n, co, h, w = s[last].op.axis
-    co, coi = s[last].split(co, factor=NTile)# cfg['tile_k'].apply(s, last, co)
-    print(co, coi)
+    # co, coi = s[last].split(co, factor=NTile)# cfg['tile_k'].apply(s, last, co)
+    # print(co, coi)
     # s[M].compute_at(s[last], co)
     # s[last].parallel(co)
 
-    MM = s.cache_read(M, 'global', [Y])
-    m = get_const_int(V.shape[0]) + 1 - 3
-    ho, wo, hi, wi = s[last].tile(h, w, m, m)
-    s[Y].compute_at(s[last], wo)
-    s[MM].compute_at(s[last], wo)
+    # MM = s.cache_read(M, 'global', [Y])
+    # m = get_const_int(V.shape[0]) + 1 - 3
+    # ho, wo, hi, wi = s[last].tile(h, w, m, m)
+    # s[Y].compute_at(s[last], wo)
+    # s[MM].compute_at(s[last], wo)
 
-    if output != last:
-        s[output].compute_inline()
+    # if output != last:
+    #     s[output].compute_inline()
 
 
 
@@ -238,7 +238,7 @@ def div_round_up(a, b):
 def round_up(a, b):
     return (a + b - 1) // b * b
 
-def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size):
+def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size, out_channels):
     N, CI, IH, IW = get_const_tuple(data.shape)
     if len(kernel.shape) == 4:
         pre_computed = False
@@ -329,7 +329,6 @@ def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size)
         assert A_data.shape == (8, 6)
         assert B_data.shape == (8, 8)
     else:
-
         raise ValueError("Unsupported tile size for winograd: " + str(tile_size))
 
     m = A_data.shape[1]
@@ -341,7 +340,7 @@ def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size)
     H = (IH + 2 * HPAD - 3) // HSTR + 1
     W = (IW + 2 * WPAD - 3) // WSTR + 1
     print("IH", H, IH, HPAD, WSTR)
-    nH, nW = (H + m-1) // m, (W + m-1) // m
+    nH, nW = div_round_up(H, m), div_round_up(W, m)
     P = round_up(N * nH * nW, MTile)
     # cfg.define_split('tile_p', cfg.axis(P), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
     # cfg.define_split('tile_k', cfg.axis(K), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
@@ -353,11 +352,15 @@ def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size)
     print("K: ", K, ", VK: ", VK)
     assert K % VK == 0
     # pack input tile
+
+    # BATCH SIZE 1
+    assert N == 1
     input_tile = tvm.compute((C, P // VP, alpha, alpha, VP),
                              lambda c, b, eps, nu, bb:
-                             data_pad[(b*VP+bb) // (nH*nW)][c][(b*VP+bb) // nW % nH * m + eps]
+                             data_pad[0][c][(b*VP+bb) // nW % nH * m + eps]
                              [(b*VP+bb) % nW * m + nu],
                              name='d')
+
 
     # transform kernel
     if pre_computed:
@@ -366,9 +369,18 @@ def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size)
         G = const_matrix(G_data, 'G')
         r_kh = tvm.reduce_axis((0, KH), 'r_kh')
         r_kw = tvm.reduce_axis((0, KW), 'r_kw')
+        pad_size = get_const_int(K - CO)
+        print(type(kernel))
+        print(type(pad_size))
+
+        kernel_pad = pad(kernel,
+                         pad_before=(0, 0, 0, 0),
+                         pad_after=(0, pad_size, 0, 0),
+                         name="kernel_pad")
         U = tvm.compute((alpha, alpha, K // VK, C, VK), lambda eps, nu, k, c, kk:
-                            tvm.sum(kernel[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
-                                    G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]), name='U')
+                        tvm.sum(kernel_pad[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
+                                G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]),
+                        name='U')
         # U = tvm.placeholder((alpha, alpha, K // VK, C, VK), dtype="float32", name="U")
 
 
@@ -389,25 +401,25 @@ def _decl_winograd(data, kernel, strides, padding, layout, out_dtype, tile_size)
     A = const_matrix(A_data, 'A')
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
     r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
-    Y = tvm.compute((P, K, m, m), lambda b, k, vh, vw:
+    Y = tvm.compute((P, out_channels, m, m), lambda b, k, vh, vw:
                     tvm.sum(M[r_eps][r_nu][b][k] * A[r_eps][vh] * A[r_nu][vw],
                             axis=[r_eps, r_nu]), name='Y')
     print("Y shape: ", Y.shape)
     # unpack output
-    output = tvm.compute((N, K, H, W), lambda n, k, h, w:
-                         Y[n * nH * nW + (h//m) * nW + w//m][k][h % m][w % m] + tvm.const(0, M.dtype) * M[alpha - 1, alpha - 1, P - 1, K - 1],
+    # P: N, nH, nW
+    output = tvm.compute((N, out_channels, H, W), lambda n, k, h, w:
+                         Y[n * nH * nW + ((h//m) % nH) * nW + ((w//m) % nW)][k][h % m][w % m], # + tvm.const(0, M.dtype) * M[alpha - 1, alpha - 1, P - 1, K - 1],
                          name='output', tag='winograd_conv_output')
 
     print("Output shape: ", output.shape)
-    import ipdb; ipdb.set_trace()
     print("IH, IW: ", IH, IW, H, W)
     # we have to manually assign effective GFLOP for winogard
     # cfg.add_flop(2 * N * K * H * W * KH * KW * C)
     return U, output
 
 
-def conv2d_winograd_nchw(A, W, stride, padding, dtype):
-    U, Y = _decl_winograd(A, W, strides=stride, padding=padding, layout="NCHW", out_dtype="float32", tile_size=6)
+def conv2d_winograd_nchw(A, W, stride, padding, out_channels, dtype):
+    U, Y = _decl_winograd(A, W, strides=stride, padding=padding, layout="NCHW", out_dtype="float32", tile_size=6, out_channels=out_channels)
     s = tvm.create_schedule(Y.op)
     _schedule_winograd(s, Y, Y)
     return s, [A, U, Y]
@@ -419,7 +431,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
     # kernel = 1
     kernel = 3
     stride = 1
-    padding = 0
+    padding = 1
     # # stride = 1
     # padding = 0
     dilation = 1
@@ -429,10 +441,12 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
     w_shape = get_const_tuple(W.shape)
     dtype = A.dtype
 
-    @memoize("topi.tests.test_topi_conv2d_nhwc.verify_nhwc")
+    # @memoize("topi.tests.test_topi_conv2d_nhwc.verify_nhwc")
     def get_ref_data():
         a_np = np.random.uniform(size=a_shape).astype(dtype)
+        a_np.fill(1)
         w_np = np.random.uniform(size=w_shape).astype(dtype)
+        w_np.fill(1)
         dw_np = topi.testing.dilate_python(w_np, (1, dilation, dilation, 1))
         b_np = topi.testing.conv2d_nhwc_python(a_np, dw_np, stride, padding)
         return a_np, w_np, b_np
@@ -451,9 +465,9 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
             B = topi.nn.conv2d_nhwc(A, dW, stride, padding)
             B_NCHW = topi.nn.conv2d(A_NCHW, W_NCHW, stride, padding, layout='NCHW')
 
-            (_, (_, W_TRNS_NCHW, _)) = conv2d_winograd_nchw(A_NCHW, W_NCHW, stride=1, padding=padding, dtype="float32")
+            (_, (_, W_TRNS_NCHW, _)) = conv2d_winograd_nchw(A_NCHW, W_NCHW, stride=1, padding=padding, dtype="float32", out_channels=num_filter)
             W_TRNS_NCHW_ = tvm.placeholder(get_const_tuple(W_TRNS_NCHW.shape), dtype="float32", name="W_TRNS_NCHW")
-            (s_wino, (_, _, B_WINO)) = conv2d_winograd_nchw(A_NCHW, W_TRNS_NCHW_, stride=1, padding=padding, dtype="float32")
+            (s_wino, (_, _, B_WINO)) = conv2d_winograd_nchw(A_NCHW, W_TRNS_NCHW_, stride=1, padding=padding, dtype="float32", out_channels=num_filter)
             s = topi.generic.schedule_conv2d_nhwc([B])
             s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
             print(tvm.lower(s_wino, [A_NCHW, W_TRNS_NCHW_, B_NCHW], simple_mode=True))
@@ -497,7 +511,11 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         # np.testing.assert_allclose(b_nchw.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
         func_wino(a_nchw, w_trns_nchw, b_nchw_tensor_mxn)
         # print(b_nchw_tensor_mxn.asnumpy())
-        np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-2)
+        print(b_nchw_tensor_mxn.asnumpy()[0, 0])
+        print(b_np.transpose(0, 3, 1, 2)[0, 0])
+        print((b_nchw_tensor_mxn.asnumpy()[0, 0] - b_np.transpose(0, 3, 1, 2)[0, 0]) / (np.abs(b_nchw_tensor_mxn.asnumpy()[0, 0]) + 1.0e-5))
+        np.testing.assert_allclose(b_nchw_tensor_mxn.asnumpy()[0, 0], b_np.transpose(0, 3, 1, 2)[0, 0], rtol=1e-1)
+
 
 
         (_, _, out_size, _) = get_const_tuple(B.shape)
@@ -524,52 +542,52 @@ def test_conv2d_nhwc():
          'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
 
     RESNET_50 = [
-        # Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 1024, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 7, 7, 512, 2048, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 1024, 2048, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 7, 7, 2048, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 2048, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 2048, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 2048, 512, 1, 1, 0, 0, 1, 1),
     ]
 
     RESNET_18 = [
         # Workload('float32', 'float32', 24, 24, 3, 16, 7, 7, 3, 3, 2, 2),
-        Workload('float32', 'float32', MTile * 3, MTile * 3, NTile * 2, NTile * 2, 7, 7, 3, 3, 2, 2),
+        # Workload('float32', 'float32', MTile * 3, MTile * 3, NTile * 2, NTile * 2, 7, 7, 3, 3, 2, 2),
         # Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
         # Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),
         # Workload('float32', 'float32', 56, 56, 64, 128, 3, 3, 1, 1, 2, 2),
         # Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 128, 128, 3, 3, 1, 1, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 128, 256, 3, 3, 1, 1, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 256, 256, 3, 3, 1, 1, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 256, 512, 3, 3, 1, 1, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 7, 7, 512, 512, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 128, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 256, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 512, 3, 3, 1, 1, 1, 1),
     ]
 
     MOBILENET = [
-        # Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
 
-        # Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
 
-        # Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
 
-        # # Workload('float32', 'float32', 224, 224, 3, 32, 3, 3, 1, 1, 2, 2),
-        # Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 256, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 512, 512, 1, 1, 0, 0, 1, 1),
+        # Workload('float32', 'float32', 224, 224, 3, 32, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 256, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 512, 512, 1, 1, 0, 0, 1, 1),
     ]
 
     def run(workload, name):
@@ -577,8 +595,8 @@ def test_conv2d_nhwc():
         print("{}: {:.2f}".format(name, scipy.stats.mstats.gmean(speedups)))
 
     run(RESNET_18, "RESNET-18")
-    # run(MOBILENET, "MOBILENET")
-    # run(RESNET_50, "RESNET-50")
+    run(MOBILENET, "MOBILENET")
+    run(RESNET_50, "RESNET-50")
 
 
 if __name__ == "__main__":

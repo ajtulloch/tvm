@@ -7,6 +7,7 @@ import tvm
 
 
 def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
+    # return _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype)
     N, CI, IH, IW = get_const_tuple(data.shape)
     CO, _, KH, KW = get_const_tuple(kernel.shape)
     HSTR, WSTR = strides if isinstance(strides, (tuple, list)) else (strides, strides)
@@ -32,7 +33,7 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
          [1/90,  1/45,   2/45],
          [1/90,  -1/45,  2/45],
          [1/45,    1/90, 1/180],
-         [1/45,   -1/90, 1/190],
+         [1/45,   -1/90, 1/180],
          [0,      0,     1]],
         dtype=np.float32)
     B_data = np.array(
@@ -73,9 +74,10 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
         kernel_pad = pad(kernel, (0, 0, 0, 0), (K - CO, 0, 0, 0), name="kernel_pad")
     else:
         kernel_pad = kernel
-    U = tvm.compute((K // VK, alpha, alpha, C, VK), lambda k, eps, nu, c, kk:
-                    tvm.sum(kernel_pad[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
-                            G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]), name='U')
+    U = tvm.compute(
+        (K // VK, alpha, alpha, C, VK), lambda k, eps, nu, c, kk:
+        tvm.sum(kernel_pad[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
+                G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]), name='U')
 
 
     # pack input tile

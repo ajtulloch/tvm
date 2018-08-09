@@ -46,7 +46,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         s = topi.generic.schedule_conv2d_nhwc([B])
         s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
         s_nchw_wino = simple_winograd.schedule_winograd(cfg, B_NCHW_wino)
-        print(tvm.lower(s_nchw_wino, [A_NCHW, W_NCHW, B_NCHW_wino], simple_mode=True))
+        # print(tvm.lower(s_nchw_wino, [A_NCHW, W_NCHW, B_NCHW_wino], simple_mode=True))
     a = tvm.nd.array(a_np, ctx)
     a_nchw = tvm.nd.array(a_np.transpose(0, 3, 1, 2), ctx)
     w = tvm.nd.array(w_np, ctx)
@@ -75,7 +75,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         b_nchw_wino.shape))
     print(np.max(np.abs(b_nchw_wino.asnumpy() - b_np.transpose(0, 3, 1, 2)) / (np.abs(b_np.transpose(0, 3, 1, 2))) + 1e-5))
 
-    np.testing.assert_allclose(b_nchw_wino.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=2e-2)
+    np.testing.assert_allclose(b_nchw_wino.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-3)
 
     return 1
 
@@ -86,15 +86,43 @@ def test_conv2d_nhwc():
         'Workload',
         ['in_dtype', 'out_dtype', 'height', 'width', 'in_filter', 'out_filter',
          'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
-
-    RESNET_50 = [
-        Workload('float32', 'float32', 18, 17, 259, 257, 1, 1, 0, 0, 1, 1),
+    WL = [
+        Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 2048, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 2048, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 2048, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 128, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 256, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 512, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 256, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 512, 512, 1, 1, 0, 0, 1, 1),
     ]
 
     def run(workload, name):
         speedups = [verify_conv2d_nhwc(1, w.in_filter, w.height, w.out_filter, w.hkernel, w.hstride, w.hpad, 1) for w in workload]
 
-    run(RESNET_50, "RESNET-50")
+    run(WL, "WL")
 
 
 if __name__ == "__main__":

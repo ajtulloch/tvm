@@ -123,8 +123,8 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     A = const_matrix(A_data, 'A')
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
     r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
-    Y = tvm.compute((K, P, m, m), lambda k, b, vh, vw:
-                    tvm.sum(M[k // VK][b // VP][r_eps][r_nu][k % VK][b % VP] * A[r_eps][vh] * A[r_nu][vw],
+    Y = tvm.compute((K // VK, P // VP, m, m), lambda k, b, vh, vw, kk, bb:
+                    tvm.sum(M[k][b][r_eps][r_nu][kk][bb] * A[r_eps][vh] * A[r_nu][vw],
                             axis=[r_eps, r_nu]), name='Y')
 
     # Y = tvm.compute((K, P, m, m), lambda k, b, vh, vw:

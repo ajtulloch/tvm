@@ -75,7 +75,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         np.argmax(np.abs(b_nchw_wino.asnumpy() - b_np.transpose(0, 3, 1, 2)), axis=None),
         b_nchw_wino.shape))
     print(np.max(np.abs(b_nchw_wino.asnumpy() - b_np.transpose(0, 3, 1, 2)) / (np.abs(b_np.transpose(0, 3, 1, 2))) + 1e-5))
-
+    print(b_np.flatten()[:5])
     np.testing.assert_allclose(b_nchw_wino.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-2)
 
     return 1
@@ -88,7 +88,7 @@ def test_conv2d_nhwc():
         ['in_dtype', 'out_dtype', 'height', 'width', 'in_filter', 'out_filter',
          'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
     WL = [
-        # Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
         # Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
         # Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
         # Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),

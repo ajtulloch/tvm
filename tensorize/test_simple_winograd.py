@@ -88,7 +88,7 @@ def test_conv2d_nhwc():
          'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
 
     RESNET_50 = [
-        Workload('float32', 'float32', 18, 17, 259, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 18, 17, 259, 257, 1, 1, 0, 0, 1, 1),
     ]
 
     def run(workload, name):

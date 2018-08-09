@@ -69,8 +69,12 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     G = const_matrix(G_data, 'G')
     r_kh = tvm.reduce_axis((0, KH), 'r_kh')
     r_kw = tvm.reduce_axis((0, KW), 'r_kw')
+    if K > CO:
+        kernel_pad = pad(kernel, (0, 0, 0, 0), (K - CO, 0, 0, 0), name="kernel_pad")
+    else:
+        kernel_pad = kernel
     U = tvm.compute((K // VK, alpha, alpha, C, VK), lambda k, eps, nu, c, kk:
-                    tvm.sum(kernel[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
+                    tvm.sum(kernel_pad[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
                             G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]), name='U')
 
 
@@ -112,7 +116,7 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
         kk = k_ % VK
         return Y[k][b][h % m][w % m][kk][bb]
 
-    output = tvm.compute((N, K, H, W), _output,
+    output = tvm.compute((N, CO, H, W), _output,
                          name='output', tag='winograd_conv_output')
 
     if cfg:

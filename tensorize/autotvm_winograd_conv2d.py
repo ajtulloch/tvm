@@ -398,7 +398,8 @@ for i, w in enumerate(WORKLOADS):
     tuner = autotvm.tuner.XGBTuner(task)
     tuner.tune(n_trial=500,
                measure_option=measure_option,
-               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation__winograd_{i}_{w.space}_{w.kernel}_{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
+               callbacks=[autotvm.callback.log_to_file('conv2d_xgb_segmentation__winograd_{i}_{w.space}_{w.kernel}_
+{w.input_channel}_{w.output_channel}.log'.format(i=i, w=w))])
 
 
 # # apply history best from log file

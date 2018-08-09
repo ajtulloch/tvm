@@ -100,7 +100,7 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
         G = const_matrix(G_data, 'G')
         r_kh = tvm.reduce_axis((0, KH), 'r_kh')
         r_kw = tvm.reduce_axis((0, KW), 'r_kw')
-        U = tvm.compute((alpha, alpha, K // VK, C, VK), lambda eps, nu, k, c, kk:
+        U = tvm.compute((K // VK, alpha, alpha, C, VK), lambda k, eps, nu, c, kk:
                         tvm.sum(kernel[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
                                 G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]), name='U')
 
@@ -108,15 +108,15 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     B = const_matrix(B_data, 'B')
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
     r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
-    V = tvm.compute((alpha, alpha, P // VP, C, VP), lambda eps, nu, b, c, bb:
+    V = tvm.compute((P // VP, alpha, alpha, C, VP), lambda b, eps, nu, c, bb:
                     tvm.sum(input_tile[c][b][r_eps][r_nu][bb].astype(out_dtype) *
                             B[r_eps][eps] * B[r_nu][nu], axis=[r_eps, r_nu]), name='V')
 
     # batch gemm
     c = tvm.reduce_axis((0, C), name='c')
     M = tvm.compute((alpha, alpha, K, P), lambda eps, nu, k, b:
-                    tvm.sum(U[eps][nu][k // VK][c][k % VK] *
-                            V[eps][nu][b // VP][c][b % VP], axis=c), name='M')
+                    tvm.sum(U[k // VK][eps][nu][c][k % VK] *
+                            V[b // VP][eps][nu][c][b % VP], axis=c), name='M')
 
     # inverse transform
     A = const_matrix(A_data, 'A')
@@ -130,7 +130,7 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     output = tvm.compute((N, K, H, W), lambda n, k, h, w:
                          Y[k][n * nH * nW + (h//m) * nW + w//m][h % m][w % m],
                          name='output', tag='winograd_conv_output')
-      
+
 
     # we have to manually assign effective GFLOP for winogard
     # cfg.add_flop(2 * N * K * H * W * KH * KW * C)
@@ -274,4 +274,3 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     if cfg:
         cfg.add_flop(2 * N * K * H * W * KH * KW * C)
     return output
-

@@ -123,7 +123,7 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     A = const_matrix(A_data, 'A')
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
     r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
-    Y = tvm.compute((K // VK, P // VP, m, m), lambda k, b, vh, vw, kk, bb:
+    Y = tvm.compute((K // VK, P // VP, m, m, VK, VP), lambda k, b, vh, vw, kk, bb:
                     tvm.sum(M[k][b][r_eps][r_nu][kk][bb] * A[r_eps][vh] * A[r_nu][vw],
                             axis=[r_eps, r_nu]), name='Y')
 
@@ -132,8 +132,15 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     #                         axis=[r_eps, r_nu]), name='Y')
 
     # unpack output
-    output = tvm.compute((N, K, H, W), lambda n, k, h, w:
-                         Y[k][n * nH * nW + (h//m) * nW + w//m][h % m][w % m],
+    def _output(n, k_, h, w):
+        b_idx = n * nH * nW + (h//m) * nW + w//m
+        b = b_idx // VP
+        bb = b_idx % VP
+        k = k_ // VK
+        kk = k_ % VK
+        return Y[k][b][h % m][w % m][kk][bb]
+
+    output = tvm.compute((N, K, H, W), _output,
                          name='output', tag='winograd_conv_output')
 
 

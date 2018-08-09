@@ -326,7 +326,7 @@ def conv2d_winograd_tensor(IH, IW, KH, KW, CIn, COut, dtype):
     s = tvm.create_schedule(Y.op)
     _schedule_winograd(cfg, s, Y, Y)
     print(tvm.lower(s, [A, U, Y], simple_mode=True))
-    raise 
+    raise
     return s, [A, U, Y]
 
 import collections

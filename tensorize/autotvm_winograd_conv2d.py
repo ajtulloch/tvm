@@ -291,7 +291,7 @@ def _decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, tile_
     P = N * nH * nW
 
     cfg.define_split('tile_p', cfg.axis(P), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
-    cfg.define_split('tile_k', cfg.axis(K), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
+    fg.define_split('tile_k', cfg.axis(K), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
     VP = cfg['tile_p'].size[-1]
     VK = cfg['tile_k'].size[-1]
 

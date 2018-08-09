@@ -6,6 +6,7 @@ from topi.nn import pad
 import tvm
 
 
+
 def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     # return _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype)
     N, CI, IH, IW = get_const_tuple(data.shape)
@@ -101,13 +102,85 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
                     tvm.sum(U[k][eps][nu][c][kk] *
                             V[b][eps][nu][c][bb], axis=c), name='M')
 
-    # inverse transform
-    A = const_matrix(A_data, 'A')
-    r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
-    r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
-    Y = tvm.compute((K // VK, P // VP, m, m, VK, VP), lambda k, b, vh, vw, kk, bb:
-                    tvm.sum(M[k][b][r_eps][r_nu][kk][bb] * A[r_eps][vh] * A[r_nu][vw],
-                            axis=[r_eps, r_nu]), name='Y')
+    def compute_A_T_dot_M(k, b, eps, nu, kk, bb):
+        temp_expr = {}
+
+        for j in range(alpha):
+            m1_add_m2 = M[k][b][1][j][kk][bb] + M[k][b][2][j][kk][bb]
+            m1_sub_m2 = M[k][b][1][j][kk][bb] - M[k][b][2][j][kk][bb]
+            m3_add_m4 = M[k][b][3][j][kk][bb] + M[k][b][4][j][kk][bb]
+            m3_sub_m4 = M[k][b][3][j][kk][bb] - M[k][b][4][j][kk][bb]
+            m5_add_m6 = M[k][b][5][j][kk][bb] + M[k][b][6][j][kk][bb]
+            m5_sub_m6 = M[k][b][5][j][kk][bb] - M[k][b][6][j][kk][bb]
+            s0 = M[k][b][0][j][kk][bb] + m1_add_m2
+            s5 = M[k][b][7][j][kk][bb] + m1_sub_m2
+            s1 = m1_sub_m2 + m5_sub_m6 * 16
+            s4 = m1_add_m2 + m3_add_m4 * 16
+            s2 = m1_add_m2 + 8 * m5_add_m6
+            s3 = m1_sub_m2 + 8 * m3_sub_m4
+            s0 = s0 + m5_add_m6 * 32
+            s5 = s5 + m3_sub_m4 * 32
+            s1 = s1 + m3_sub_m4 * 2
+            s4 = s4 + m5_add_m6 * 2
+            s0 = s0 + m3_add_m4
+            s5 = s5 + m5_sub_m6
+            s2 = s2 + m3_add_m4 * 4
+            s3 = s3 + m5_sub_m6 * 4
+            temp_expr[(0, j)] = s0
+            temp_expr[(1, j)] = s1
+            temp_expr[(2, j)] = s2
+            temp_expr[(3, j)] = s3
+            temp_expr[(4, j)] = s4
+            temp_expr[(5, j)] = s5
+        now = tvm.const(0.0, "float32")
+        for ii in range(m):
+            for jj in range(alpha):
+                now = tvm.select(tvm.all(eps == ii, nu == jj),
+                                 temp_expr[(ii, jj)],
+                                 now)
+        return now
+
+    A_T_dot_M = tvm.compute((K // VK, P // VP, m, alpha, VK, VP), compute_A_T_dot_M, name="A_T_dot_M")
+
+    def compute_X_dot_A(k, b, eps, nu, kk, bb):
+        temp_expr = {}
+
+        for i in range(m):
+            m1_add_m2 = A_T_dot_M[k][b][i][1][kk][bb] + A_T_dot_M[k][b][i][2][kk][bb]
+            m1_sub_m2 = A_T_dot_M[k][b][i][1][kk][bb] - A_T_dot_M[k][b][i][2][kk][bb]
+            m3_add_m4 = A_T_dot_M[k][b][i][3][kk][bb] + A_T_dot_M[k][b][i][4][kk][bb]
+            m3_sub_m4 = A_T_dot_M[k][b][i][3][kk][bb] - A_T_dot_M[k][b][i][4][kk][bb]
+            m5_add_m6 = A_T_dot_M[k][b][i][5][kk][bb] + A_T_dot_M[k][b][i][6][kk][bb]
+            m5_sub_m6 = A_T_dot_M[k][b][i][5][kk][bb] - A_T_dot_M[k][b][i][6][kk][bb]
+            s0 = A_T_dot_M[k][b][i][0][kk][bb] + m1_add_m2
+            s5 = A_T_dot_M[k][b][i][7][kk][bb] + m1_sub_m2
+            s1 = m1_sub_m2 + m5_sub_m6 * 16
+            s4 = m1_add_m2 + m3_add_m4 * 16
+            s2 = m1_add_m2 + 8 * m5_add_m6
+            s3 = m1_sub_m2 + 8 * m3_sub_m4
+            s0 = s0 + m5_add_m6 * 32
+            s5 = s5 + m3_sub_m4 * 32
+            s1 = s1 + m3_sub_m4 * 2
+            s4 = s4 + m5_add_m6 * 2
+            s0 = s0 + m3_add_m4
+            s5 = s5 + m5_sub_m6
+            s2 = s2 + m3_add_m4 * 4
+            s3 = s3 + m5_sub_m6 * 4
+            temp_expr[(i, 0)] = s0
+            temp_expr[(i, 1)] = s1
+            temp_expr[(i, 2)] = s2
+            temp_expr[(i, 3)] = s3
+            temp_expr[(i, 4)] = s4
+            temp_expr[(i, 5)] = s5
+        now = tvm.const(0.0, "float32")
+        for ii in range(m):
+            for jj in range(m):
+                now = tvm.select(tvm.all(eps == ii, nu == jj),
+                                 temp_expr[(ii, jj)],
+                                 now)
+        return now
+
+    Y = tvm.compute((K // VK, P // VP, m, m, VK, VP), compute_X_dot_A, name="Y")
 
     # unpack output
     def _output(n, k_, h, w):

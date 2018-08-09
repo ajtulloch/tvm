@@ -47,7 +47,7 @@ def verify_conv2d_nhwc(batch, in_channel, in_size, num_filter, kernel, stride, p
         s = topi.generic.schedule_conv2d_nhwc([B])
         s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
         s_nchw_wino = simple_winograd.schedule_winograd(cfg, B_NCHW_wino)
-        # print(tvm.lower(s_nchw_wino, [A_NCHW, W_NCHW, B_NCHW_wino], simple_mode=True))
+        print(tvm.lower(s_nchw_wino, [A_NCHW, W_NCHW, B_NCHW_wino], simple_mode=True))
     a = tvm.nd.array(a_np, ctx)
     a_nchw = tvm.nd.array(a_np.transpose(0, 3, 1, 2), ctx)
     w = tvm.nd.array(w_np, ctx)

@@ -4,7 +4,7 @@ import numpy as np
 from topi.nn.util import get_const_int, get_pad_tuple
 from topi.nn import pad
 import tvm
-
+from tvm import autotvm
 
 
 def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
@@ -58,8 +58,8 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     W = (IW + 2 * WPAD - 3) // WSTR + 1
     nH, nW = (H + m-1) // m, (W + m-1) // m
 
-    VP = 4
-    VK = 4
+    VP = 8
+    VK = 8
 
     def round_up(a, b): return ((a + b - 1) // b) * b
     K = round_up(CO, VK)
@@ -281,4 +281,71 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
 
 def schedule_winograd(cfg, output):
     s = tvm.create_schedule(output.op)
+    Y = output.op.input_tensors[0]
+    A_T_dot_M = Y.op.input_tensors[0]
+    M = A_T_dot_M.op.input_tensors[0]
+    U, V = M.op.input_tensors
+    B_T_dot_X = V.op.input_tensors[0]
+    input_tile = B_T_dot_X.op.input_tensors[0]
+    data_pad = input_tile.op.input_tensors[0]
+    # padding
+    s[data_pad].compute_inline()
+
+    # pack input tiles
+    # s[d].compute_inline()
+
+    # transform kernel
+    if isinstance(U.op, tvm.tensor.ComputeOp):
+        kernel, G = U.op.input_tensors
+        if isinstance(kernel.op, tvm.tensor.ComputeOp):
+            pass
+            # s[kernel].compute_inline()
+
+        s[G].compute_inline()
+        eps, nu, k, c, kk, = s[U].op.axis
+        r_kh, r_kw = s[U].op.reduce_axis
+        s[U].reorder(k, c, eps, nu, r_kh, r_kw, kk)
+        # s[U].unroll(eps)
+        # s[U].unroll(nu)
+        # s[U].unroll(r_kh)
+        # s[U].unroll(r_kw)
+        s[U].vectorize(kk)
+        if autotvm.GLOBAL_SCOPE.in_tuning:
+            # kernel transformation will be pre-computed during compilation, so we skip
+            # this part to make tuning records correct
+            s[U].pragma(k, 'debug_skip_region')
+
+
+    UNROLL = True
+    # Schedule output
+    (k, b, eps, nu, kk, bb) = A_T_dot_M.op.axis
+    if UNROLL:
+        [s[A_T_dot_M].unroll(ax) for ax in [eps, nu]]
+    s[A_T_dot_M].vectorize(bb)
+
+    (k, b, eps, nu, kk, bb) = Y.op.axis
+    if UNROLL:
+        [s[Y].unroll(ax) for ax in [eps, nu]]
+    s[Y].vectorize(bb)
+
+    s[A_T_dot_M].compute_at(s[Y], b)
+
+
+    # Schedule V
+    (b, c, eps, nu, bb) = B_T_dot_X.op.axis
+    if UNROLL:
+        [s[B_T_dot_X].unroll(ax) for ax in [eps, nu]]
+    s[B_T_dot_X].vectorize(bb)
+    s[input_tile].compute_at(s[B_T_dot_X], b)
+    
+    (b, eps, nu, c, bb) = V.op.axis
+    if UNROLL:
+        [s[V].unroll(ax) for ax in [eps, nu]]
+    s[V].vectorize(bb)
+    s[B_T_dot_X].compute_at(s[V], b)
+
+
+    (k, b, eps, nu, kk, bb) = M.op.axis
+    s[V].compute_at(s[M], b)
+    s[M].vectorize(bb)
     return s

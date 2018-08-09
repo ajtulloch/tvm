@@ -88,19 +88,100 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
                              [(b*VP+bb) % nW * m + nu],
                              name='d')
 
-    # transform image
-    B = const_matrix(B_data, 'B')
-    r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
-    r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
-    V = tvm.compute((P // VP, alpha, alpha, C, VP), lambda b, eps, nu, c, bb:
-                    tvm.sum(input_tile[b][c][r_eps][r_nu][bb].astype(out_dtype) *
-                            B[r_eps][eps] * B[r_nu][nu], axis=[r_eps, r_nu]), name='V')
+    def compute_B_T_dot_X(b, c, eps, nu, bb):
+        temp_expr = {}
+        for j in range(alpha):
+            wd0 = input_tile[b][c][0][j][bb] - input_tile[b][c][6][j][bb]
+            d4_sub_d2 = input_tile[b][c][4][j][bb] - input_tile[b][c][2][j][bb]
+            wd7 = input_tile[b][c][7][j][bb] - input_tile[b][c][1][j][bb]
+            d3_sub_d5 = input_tile[b][c][3][j][bb] - input_tile[b][c][5][j][bb]
+            wd1 = input_tile[b][c][2][j][bb] + input_tile[b][c][6][j][bb]
+            wd2 = input_tile[b][c][1][j][bb] + input_tile[b][c][5][j][bb]
+            wd4 = input_tile[b][c][5][j][bb] + input_tile[b][c][1][j][bb] * 0.25
+            wd5 = input_tile[b][c][6][j][bb] - input_tile[b][c][4][j][bb] * 5
+            wd3 = input_tile[b][c][6][j][bb] + input_tile[b][c][2][j][bb] * 0.25
+            wd6 = input_tile[b][c][1][j][bb] + input_tile[b][c][5][j][bb] * 0.25
+
+            wd0 = wd0 + d4_sub_d2 * 5.25
+            wd7 = wd7 + d3_sub_d5 * 5.25
+
+            wd1 = wd1 - input_tile[b][c][4][j][bb] * 4.25
+            wd2 = wd2 - input_tile[b][c][3][j][bb] * 4.25
+
+            wd3 = wd3 - input_tile[b][c][4][j][bb] * 1.25
+            wd5 = wd5 + input_tile[b][c][2][j][bb] * 4
+            wd4 = wd4 - input_tile[b][c][3][j][bb] * 1.25
+            wd6 = wd6 - input_tile[b][c][3][j][bb] * 1.25
+
+            temp_expr[(0, j)] = wd0
+            temp_expr[(1, j)] = wd1 + wd2
+            temp_expr[(2, j)] = wd1 - wd2
+            temp_expr[(3, j)] = wd3 + wd4 * 2
+            temp_expr[(4, j)] = wd3 - wd4 * 2
+            temp_expr[(5, j)] = wd5 + wd6 * 2
+            temp_expr[(6, j)] = wd5 - wd6 * 2
+            temp_expr[(7, j)] = wd7
+
+        now = tvm.const(0.0, "float32")
+        for ii in range(alpha):
+            for jj in range(alpha):
+                now = tvm.select(tvm.all(eps == ii, nu == jj),
+                                 temp_expr[(ii, jj)],
+                                 now)
+        return now
+
+    B_T_dot_X = tvm.compute((P // VP, C, alpha, alpha, VP), compute_B_T_dot_X, name="B_T_dot_X")
+
+    def compute_X_dot_B(b, eps, nu, c, bb):
+        temp_expr = {}
+
+        for i in range(alpha):
+            wd0 = B_T_dot_X[b][c][i][0][bb] - B_T_dot_X[b][c][i][6][bb]
+            d4_sub_d2 = B_T_dot_X[b][c][i][4][bb] - B_T_dot_X[b][c][i][2][bb]
+            wd7 = B_T_dot_X[b][c][i][7][bb] - B_T_dot_X[b][c][i][1][bb]
+            d3_sub_d5 = B_T_dot_X[b][c][i][3][bb] - B_T_dot_X[b][c][i][5][bb]
+            wd1 = B_T_dot_X[b][c][i][2][bb] + B_T_dot_X[b][c][i][6][bb]
+            wd2 = B_T_dot_X[b][c][i][1][bb] + B_T_dot_X[b][c][i][5][bb]
+            wd4 = B_T_dot_X[b][c][i][5][bb] + B_T_dot_X[b][c][i][1][bb] * 0.25
+            wd5 = B_T_dot_X[b][c][i][6][bb] - B_T_dot_X[b][c][i][4][bb] * 5
+            wd3 = B_T_dot_X[b][c][i][6][bb] + B_T_dot_X[b][c][i][2][bb] * 0.25
+            wd6 = B_T_dot_X[b][c][i][1][bb] + B_T_dot_X[b][c][i][5][bb] * 0.25
+
+            wd0 = wd0 + d4_sub_d2 * 5.25
+            wd7 = wd7 + d3_sub_d5 * 5.25
+
+            wd1 = wd1 - B_T_dot_X[b][c][i][4][bb] * 4.25
+            wd2 = wd2 - B_T_dot_X[b][c][i][3][bb] * 4.25
+
+            wd3 = wd3 - B_T_dot_X[b][c][i][4][bb] * 1.25
+            wd5 = wd5 + B_T_dot_X[b][c][i][2][bb] * 4
+            wd4 = wd4 - B_T_dot_X[b][c][i][3][bb] * 1.25
+            wd6 = wd6 - B_T_dot_X[b][c][i][3][bb] * 1.25
+
+            temp_expr[(i, 0)] = wd0
+            temp_expr[(i, 1)] = wd1 + wd2
+            temp_expr[(i, 2)] = wd1 - wd2
+            temp_expr[(i, 3)] = wd3 + wd4 * 2
+            temp_expr[(i, 4)] = wd3 - wd4 * 2
+            temp_expr[(i, 5)] = wd5 + wd6 * 2
+            temp_expr[(i, 6)] = wd5 - wd6 * 2
+            temp_expr[(i, 7)] = wd7
+
+        now = tvm.const(0.0, "float32")
+        for ii in range(alpha):
+            for jj in range(alpha):
+                now = tvm.select(tvm.all(eps == ii, nu == jj),
+                                 temp_expr[(ii, jj)],
+                                 now)
+        return now
+    V = tvm.compute((P // VP, alpha, alpha, C, VP), compute_X_dot_B, name="V")
 
     # batch gemm
     c = tvm.reduce_axis((0, C), name='c')
-    M = tvm.compute((K // VK, P // VP, alpha, alpha, VK, VP), lambda k, b, eps, nu, kk, bb:
-                    tvm.sum(U[k][eps][nu][c][kk] *
-                            V[b][eps][nu][c][bb], axis=c), name='M')
+    M = tvm.compute(
+        (K // VK, P // VP, alpha, alpha, VK, VP),
+        lambda k, b, eps, nu, kk, bb: tvm.sum(U[k][eps][nu][c][kk] * V[b][eps][nu][c][bb], axis=c),
+        name='M')
 
     def compute_A_T_dot_M(k, b, eps, nu, kk, bb):
         temp_expr = {}

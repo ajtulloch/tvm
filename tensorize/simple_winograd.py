@@ -83,15 +83,8 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
 
     #cfg.define_split('tile_p', cfg.axis(P), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
     #cfg.define_split('tile_k', cfg.axis(K), num_outputs=2, filter=lambda x: x.size[-1] <= 16)
-    VP = 1#cfg['tile_p'].size[-1]
-    VK = 1#cfg['tile_k'].size[-1]
-
-    # pack input tile
-    input_tile = tvm.compute((C, P // VP, alpha, alpha, VP),
-                             lambda c, b, eps, nu, bb:
-                             data_pad[(b*VP+bb) // (nH*nW)][c][(b*VP+bb) // nW % nH * m + eps]
-                             [(b*VP+bb) % nW * m + nu],
-                             name='d')
+    VP = 2#cfg['tile_p'].size[-1]
+    VK = 4#cfg['tile_k'].size[-1]
 
     # transform kernel
     if pre_computed:
@@ -104,27 +97,39 @@ def _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
                         tvm.sum(kernel[k * VK + kk][c][r_kh][r_kw].astype(out_dtype) *
                                 G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]), name='U')
 
+
+    # pack input tile
+    input_tile = tvm.compute((P // VP, C, alpha, alpha, VP),
+                             lambda b, c, eps, nu, bb:
+                             data_pad[(b*VP+bb) // (nH*nW)][c][(b*VP+bb) // nW % nH * m + eps]
+                             [(b*VP+bb) % nW * m + nu],
+                             name='d')
+
     # transform image
     B = const_matrix(B_data, 'B')
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
     r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
     V = tvm.compute((P // VP, alpha, alpha, C, VP), lambda b, eps, nu, c, bb:
-                    tvm.sum(input_tile[c][b][r_eps][r_nu][bb].astype(out_dtype) *
+                    tvm.sum(input_tile[b][c][r_eps][r_nu][bb].astype(out_dtype) *
                             B[r_eps][eps] * B[r_nu][nu], axis=[r_eps, r_nu]), name='V')
 
     # batch gemm
     c = tvm.reduce_axis((0, C), name='c')
-    M = tvm.compute((alpha, alpha, K, P), lambda eps, nu, k, b:
-                    tvm.sum(U[k // VK][eps][nu][c][k % VK] *
-                            V[b // VP][eps][nu][c][b % VP], axis=c), name='M')
+    M = tvm.compute((K // VK, P // VP, alpha, alpha, VK, VP), lambda k, b, eps, nu, kk, bb:
+                    tvm.sum(U[k][eps][nu][c][kk] *
+                            V[b][eps][nu][c][bb], axis=c), name='M')
 
     # inverse transform
     A = const_matrix(A_data, 'A')
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
     r_nu = tvm.reduce_axis((0, alpha), 'r_nu')
     Y = tvm.compute((K, P, m, m), lambda k, b, vh, vw:
-                    tvm.sum(M[r_eps][r_nu][k][b] * A[r_eps][vh] * A[r_nu][vw],
+                    tvm.sum(M[k // VK][b // VP][r_eps][r_nu][k % VK][b % VP] * A[r_eps][vh] * A[r_nu][vw],
                             axis=[r_eps, r_nu]), name='Y')
+
+    # Y = tvm.compute((K, P, m, m), lambda k, b, vh, vw:
+    #                 tvm.sum(M[k // VK][b // VP][r_eps][r_nu][k % VK][b % VP] * A[r_eps][vh] * A[r_nu][vw],
+    #                         axis=[r_eps, r_nu]), name='Y')
 
     # unpack output
     output = tvm.compute((N, K, H, W), lambda n, k, h, w:

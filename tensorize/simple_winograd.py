@@ -459,8 +459,8 @@ def schedule_winograd(cfg, output, VK, VP):
     if VECTORIZE:
         s[B_T_dot_X].vectorize(bb)
 
-    if cfg['B_T_dot_X_REORDER_C'].val:
-        s[B_T_dot_X].reorder(b, eps, nu, c, bb)
+    # if cfg['B_T_dot_X_REORDER_C'].val:
+    #     s[B_T_dot_X].reorder(b, eps, nu, c, bb)
 
     if cfg['input_tile_COMPUTE_AT'].val:
         s[input_tile].compute_at(s[B_T_dot_X], b)

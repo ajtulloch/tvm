@@ -311,7 +311,7 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('vectorize', [1])
     cfg.define_knob('tensorize', [1])
     cfg.define_knob('VK', [4])
-    cfg.define_knob('VP', [8, 16])
+    cfg.define_knob('VP', [16, 24])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
         cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [1])
     for intermediate in ["input_tile", "V"]: # , "B_T_dot_X",

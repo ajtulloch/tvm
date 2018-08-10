@@ -311,10 +311,10 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('vectorize', [1])
     cfg.define_knob('tensorize', [1])
     cfg.define_knob('VK', [4])
-    cfg.define_knob('VP', [16])
+    cfg.define_knob('VP', [8, 16])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
         cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [1])
-    for intermediate in ["input_tile", "B_T_dot_X", "V"]:
+    for intermediate in ["input_tile", "V"]: # , "B_T_dot_X",
         cfg.define_knob("{}_REORDER_C".format(intermediate), [0, 1])
 
     cfg.define_knob('data_pad_inline', [0, 1])
@@ -338,7 +338,11 @@ import sys
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 WORKLOADS = [
-        Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+        Workload(space=102, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # Workload(space=102, input_channel=32, output_channel=32, kernel=3, pad=1, stride=1),
+        # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+        # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
         # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
         # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
         Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
@@ -362,7 +366,7 @@ WORKLOADS = [
 for i, w in enumerate(WORKLOADS):
     measure_option = autotvm.measure_option(
         measure_func='local',
-        number=3)
+        number=50)
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,

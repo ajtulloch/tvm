@@ -7,11 +7,11 @@ import tvm
 from tvm import autotvm
 
 
-MTile = 4
+MTile = (4, )
 NTupleTile = 3
 TupleTile = 8
 MMTile = 4
-NTile = 16
+NTile = (24, 16, 8)
 KTile = 256
 ARCH = "avx2"
 BITCODE_PATHS = [
@@ -25,8 +25,8 @@ def bitcode_paths():
 
 # Tensorized
 def intrin_gemm(M, N, K):
-    assert M == MTile
-    assert N == NTile
+    assert M in MTile, M
+    assert N in NTile, N
     dtype = 'float32'
     A = tvm.placeholder((K, M), dtype=dtype, name='A')
     B = tvm.placeholder((K, N), dtype=dtype, name='B')
@@ -36,11 +36,11 @@ def intrin_gemm(M, N, K):
 
     Ab = tvm.decl_buffer(A.shape, A.dtype,
                         name="A",
-                        offset_factor=MTile,
+                        offset_factor=M,
                         strides=[M, 1])
     Bb = tvm.decl_buffer(B.shape, B.dtype,
                         name="B",
-                        offset_factor=NTile,
+                        offset_factor=N,
                         strides=[N, 1])
     Cb = tvm.decl_buffer(C.shape, C.dtype,
                         name="C",
@@ -55,7 +55,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_compute_{MTile}x{NTile}__{ARCH}".format(**globals()),
+                "sgemm_compute_{M}x{N}__{ARCH}".format(M=M, N=N, ARCH=ARCH),
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -71,7 +71,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_reset_{MTile}x{NTile}__{ARCH}".format(**globals()),
+                "sgemm_reset_{M}x{N}__{ARCH}".format(M=M, N=N, ARCH=ARCH),
                 irb.buffer_ptr(cc),
                 cc.elem_offset,
                 cc.strides[0])
@@ -82,7 +82,7 @@ def intrin_gemm(M, N, K):
             irb = tvm.ir_builder.create()
             extern_call = tvm.call_extern(
                 "int32",
-                "sgemm_update_{MTile}x{NTile}__{ARCH}".format(**globals()),
+                "sgemm_update_{M}x{N}__{ARCH}".format(M=M, N=N, ARCH=ARCH),
                 K,
                 irb.buffer_ptr(aa),
                 aa.elem_offset,
@@ -100,58 +100,7 @@ def intrin_gemm(M, N, K):
                                       intrin_func,
                                       binds={A: Ab, B: Bb, C: Cb})
 
-# Tensorized
-def intrin_tuple_gemm(M, N, K, T):
-    assert M == MTile
-    assert N == NTupleTile
-    assert T == TupleTile
-    dtype = 'float32'
-    A = tvm.placeholder((K, M, T), dtype=dtype, name='A')
-    B = tvm.placeholder((K, N, T), dtype=dtype, name='B')
-    k = tvm.reduce_axis((0, K), name='k')
-    C = tvm.compute((M, N, T), lambda m, n, t:
-                    tvm.sum(A[k, m, t] * B[k, n, t], axis=[k]), name='C')
-
-    Ab = tvm.decl_buffer(A.shape, A.dtype,
-                        name="A",
-                        offset_factor=MTile,
-                        strides=[M * T, T, 1])
-    Bb = tvm.decl_buffer(B.shape, B.dtype,
-                        name="B",
-                        offset_factor=NTile,
-                        strides=[N * T, T, 1])
-    Cb = tvm.decl_buffer(C.shape, C.dtype,
-                        name="C",
-                        offset_factor=1,
-                        strides=[tvm.var('ldc'), T, 1])
-
-    def intrin_func(ins, outs):
-        aa, bb = ins
-        cc = outs[0]
-
-        def body():
-            irb = tvm.ir_builder.create()
-            extern_call = tvm.call_extern(
-                "int32",
-                "tuple_sgemm_compute_{MTile}x{NTupleTile}x{TupleTile}__{ARCH}".format(**globals()),
-                K,
-                irb.buffer_ptr(aa),
-                aa.elem_offset,
-                irb.buffer_ptr(bb),
-                bb.elem_offset,
-                irb.buffer_ptr(cc),
-                cc.elem_offset,
-                cc.strides[0])
-            irb.emit(extern_call)
-            return irb.get()
-        return body()
-
-    with tvm.build_config():
-        return tvm.decl_tensor_intrin(C.op,
-                                      intrin_func,
-                                      binds={A: Ab, B: Bb, C: Cb})
-
-def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, VP=8):
+def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, VP=8, packed_output=True):
     # return _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype)
     N, CI, IH, IW = get_const_tuple(data.shape)
     CO, _, KH, KW = get_const_tuple(kernel.shape)
@@ -419,13 +368,17 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
 
     if cfg:
         cfg.add_flop(2 * N * K * H * W * KH * KW * C)
-    return Y #output
+
+    return Y if packed_output else output
 
 def schedule_winograd(cfg, output, VK, VP):
     s = tvm.create_schedule(output.op)
     if not cfg:
         return s
-    Y = output #.op.input_tensors[0]
+    if output.name == "Y":
+        Y = output
+    else:
+        Y = output.op.input_tensors[0]
     A_T_dot_M = Y.op.input_tensors[0]
     M = A_T_dot_M.op.input_tensors[0]
     U, V = M.op.input_tensors
@@ -527,9 +480,9 @@ def schedule_winograd(cfg, output, VK, VP):
     if cfg['V_COMPUTE_AT'].val:
         s[V].compute_at(s[M], b)
     s[M].reorder(b, k, eps, nu, kk, bb)
-    if TENSORIZE and VK == MTile and VP == NTile:
+    if TENSORIZE and VK in MTile and VP in NTile:
         K = get_const_int(M.op.reduce_axis[0].dom.extent)
-        s[M].tensorize(kk, intrin_gemm(M=MTile, N=NTile, K=K))
+        s[M].tensorize(kk, intrin_gemm(M=VK, N=VP, K=K))
     elif VECTORIZE:
         s[M].vectorize(bb)
 

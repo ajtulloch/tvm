@@ -303,11 +303,12 @@ def output_transform_autotvm(dtype):
 @autotvm.template
 def conv2d_winograd_autotvm(dtype):
     cfg = autotvm.get_config()
-    cfg.define_knob('unroll', [0, 1])
-    cfg.define_knob('compute_at', [0, 1])
-    cfg.define_knob('vectorize', [0, 1])
-    cfg.define_knob('VK', [2, 4, 8, 16])
-    cfg.define_knob('VP', [4, 8, 16])
+    cfg.define_knob('unroll', [1])
+    cfg.define_knob('compute_at', [0])
+    cfg.define_knob('vectorize', [1])
+    cfg.define_knob('tensorize', [0, 1])
+    cfg.define_knob('VK', [4, 16])
+    cfg.define_knob('VP', [16, 24])
     VK = cfg['VK'].val
     VP = cfg['VP'].val
     N = 1
@@ -318,8 +319,9 @@ def conv2d_winograd_autotvm(dtype):
     W = tvm.placeholder(shape=(64, 64, 3, 3), dtype="float32", name="W")
 
     output = simple_winograd.decl_winograd(cfg, X, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", VK=VK, VP=VP)
-    s = simple_winograd.schedule_winograd(cfg, output)
+    s = simple_winograd.schedule_winograd(cfg, output, VK=VK, VP=VP)
     cfg.add_flop(2 * N * CIn * COut * S * S * 3 * 3)
+    print(tvm.lower(s, [X, W, output], simple_mode=True))
     return s, [X, W, output]
 
 
@@ -337,7 +339,7 @@ task = autotvm.task.create(
     args=("float32",),
     target=tvm.target.create('llvm -mcpu=core-avx2'))
 print(task.config_space)
-tuner = autotvm.tuner.XGBTuner(task)
+tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
 tuner.tune(
     n_trial=100,
     measure_option=measure_option,

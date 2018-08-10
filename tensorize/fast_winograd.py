@@ -6,6 +6,7 @@ import numpy as np
 import tvm
 import tvm.rpc
 from tvm import autotvm
+import simple_winograd
 
 A_data = np.array([[1,  1,  1,   1,    1,    32,      32,    0],
                    [0,  1,  -1,  2,   -2,   16,   -16,   0],
@@ -265,6 +266,7 @@ def schedule_output_transform(cfg, output):
             s[Y].unroll(r_nu)
     return s
 
+
 @autotvm.template
 def output_transform_autotvm(dtype):
     cfg = autotvm.get_config()
@@ -287,6 +289,7 @@ def output_transform_autotvm(dtype):
     K = get_const_int(W.shape[0])
     assert K % VK == 0
     assert P % VP == 0
+
     cfg.define_knob('use_minimal', [1])
     M = tvm.placeholder(shape=(K // VK, P // VP, alpha, alpha, VK, VP), name="M")
     if cfg['use_minimal'].val:
@@ -294,9 +297,30 @@ def output_transform_autotvm(dtype):
     else:
         output = decl_output_transform(cfg, X, M, VK, VP)
     s = schedule_output_transform(cfg, output)
-    cfg.add_flop(2 * N * K * OH * OW * alpha * alpha)
     # print(tvm.lower(s, [X, M, output], simple_mode=True))
     return s, [X, M, output]
+
+@autotvm.template
+def conv2d_winograd_autotvm(dtype):
+    cfg = autotvm.get_config()
+    cfg.define_knob('unroll', [0, 1])
+    cfg.define_knob('compute_at', [0, 1])
+    cfg.define_knob('vectorize', [0, 1])
+    cfg.define_knob('VK', [2, 4, 8, 16])
+    cfg.define_knob('VP', [4, 8, 16])
+    VK = cfg['VK'].val
+    VP = cfg['VP'].val
+    N = 1
+    S = 56
+    CIn = 64
+    COut = 64
+    X = tvm.placeholder(shape=(N, CIn, S, S), dtype="float32", name="X")
+    W = tvm.placeholder(shape=(64, 64, 3, 3), dtype="float32", name="W")
+
+    output = simple_winograd.decl_winograd(cfg, X, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", VK=VK, VP=VP)
+    s = simple_winograd.schedule_winograd(cfg, output)
+    cfg.add_flop(2 * N * CIn * COut * S * S * 3 * 3)
+    return s, [X, W, output]
 
 
 
@@ -306,15 +330,15 @@ logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 measure_option = autotvm.measure_option(
     measure_func='local',
-    number=2)
-
+    number=3)
 
 task = autotvm.task.create(
-    output_transform_autotvm,
+    conv2d_winograd_autotvm,
     args=("float32",),
     target=tvm.target.create('llvm -mcpu=core-avx2'))
+print(task.config_space)
 tuner = autotvm.tuner.XGBTuner(task)
 tuner.tune(
     n_trial=100,
     measure_option=measure_option,
-    callbacks=[autotvm.callback.log_to_file('output_transform_winograd.log')])
+    callbacks=[autotvm.callback.log_to_file('conv2d_minimal_winograd.log')])

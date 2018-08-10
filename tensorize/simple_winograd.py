@@ -7,7 +7,7 @@ import tvm
 from tvm import autotvm
 
 
-def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
+def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, VP=8):
     # return _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype)
     N, CI, IH, IW = get_const_tuple(data.shape)
     CO, _, KH, KW = get_const_tuple(kernel.shape)
@@ -57,9 +57,6 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype):
     H = (IH + 2 * HPAD - 3) // HSTR + 1
     W = (IW + 2 * WPAD - 3) // WSTR + 1
     nH, nW = (H + m-1) // m, (W + m-1) // m
-
-    VP = 8
-    VK = 8
 
     def round_up(a, b): return ((a + b - 1) // b) * b
     K = round_up(CO, VK)
@@ -296,30 +293,33 @@ def schedule_winograd(cfg, output):
     # s[d].compute_inline()
 
     # transform kernel
-    # if isinstance(U.op, tvm.tensor.ComputeOp):
-    #     kernel, G = U.op.input_tensors
-    #     if isinstance(kernel.op, tvm.tensor.ComputeOp):
-    #         pass
-    #         # s[kernel].compute_inline()
+    if isinstance(U.op, tvm.tensor.ComputeOp):
+        kernel, G = U.op.input_tensors
+        if isinstance(kernel.op, tvm.tensor.ComputeOp):
+            s[kernel].compute_inline()
 
-    #     # s[G].compute_inline()
-    #     # eps, nu, k, c, kk, = s[U].op.axis
-    #     # r_kh, r_kw = s[U].op.reduce_axis
-    #     # s[U].reorder(k, c, eps, nu, r_kh, r_kw, kk)
-    #     # s[U].unroll(eps)
-    #     # s[U].unroll(nu)
-    #     # s[U].unroll(r_kh)
-    #     # s[U].unroll(r_kw)
-    #     # s[U].vectorize(kk)
-    #     if autotvm.GLOBAL_SCOPE.in_tuning:
-    #         # kernel transformation will be pre-computed during compilation, so we skip
-    #         # this part to make tuning records correct
-    #         s[U].pragma(k, 'debug_skip_region')
-
+        s[G].compute_inline()
+        eps, nu, k, c, kk, = s[U].op.axis
+        r_kh, r_kw = s[U].op.reduce_axis
+        s[U].reorder(k, c, eps, nu, r_kh, r_kw, kk)
+        s[U].unroll(eps)
+        s[U].unroll(nu)
+        s[U].unroll(r_kh)
+        s[U].unroll(r_kw)
+        s[U].vectorize(kk)
+        if autotvm.GLOBAL_SCOPE.in_tuning:
+            # kernel transformation will be pre-computed during compilation, so we skip
+            # this part to make tuning records correct
+            s[U].pragma(k, 'debug_skip_region')
 
     UNROLL = True
     COMPUTE_AT = False
     VECTORIZE = True
+
+    if cfg:
+        UNROLL = cfg['unroll'].val
+        COMPUTE_AT = cfg['compute_at'].val
+        VECTORIZE = cfg['vectorize'].val
     # Schedule output
     (k, b, eps, nu, kk, bb) = A_T_dot_M.op.axis
     if UNROLL:

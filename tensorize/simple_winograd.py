@@ -382,6 +382,8 @@ def schedule_winograd(cfg, output, VK, VP):
     # [data_pad].compute_inline()
 
     # pack input tiles
+    (b, c, eps, nu, bb) = input_tile.op.axis
+    s[input_tile].vectorize(bb)
     # s[input_tile].compute_inline()
 
     # transform kernel

@@ -11,7 +11,7 @@ MTile = 4
 NTupleTile = 3
 TupleTile = 8
 MMTile = 4
-NTile = 24
+NTile = 16
 KTile = 256
 ARCH = "avx2"
 BITCODE_PATHS = [
@@ -419,13 +419,13 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
 
     if cfg:
         cfg.add_flop(2 * N * K * H * W * KH * KW * C)
-    return output
+    return Y #output
 
 def schedule_winograd(cfg, output, VK, VP):
     s = tvm.create_schedule(output.op)
     if not cfg:
         return s
-    Y = output.op.input_tensors[0]
+    Y = output #.op.input_tensors[0]
     A_T_dot_M = Y.op.input_tensors[0]
     M = A_T_dot_M.op.input_tensors[0]
     U, V = M.op.input_tensors
@@ -451,6 +451,7 @@ def schedule_winograd(cfg, output, VK, VP):
         s[input_tile].vectorize(bb)
     if autotvm.GLOBAL_SCOPE.in_tuning:
         s[input_tile].pragma(b, 'debug_skip_region')
+        s[data_pad].pragma(data_pad.op.axis[0], 'debug_skip_region')
     # s[input_tile].compute_inline()
 
     # transform kernel
@@ -479,17 +480,18 @@ def schedule_winograd(cfg, output, VK, VP):
     #     s[output].pragma(s[output].axis[0], 'debug_skip_region')
 
     (k, b, eps, nu, kk, bb) = A_T_dot_M.op.axis
+    s[A_T_dot_M].reorder(b, k, eps, nu, kk, bb)
     if UNROLL:
-        [s[A_T_dot_M].unroll(ax) for ax in [eps, nu]]
-
+        [s[A_T_dot_M].unroll(ax) for ax in [eps, nu, kk]]
     if VECTORIZE:
         s[A_T_dot_M].vectorize(bb)
 
     if cfg['M_COMPUTE_AT'].val:
         s[M].compute_at(s[A_T_dot_M], b)
     (k, b, eps, nu, kk, bb) = Y.op.axis
+    s[Y].reorder(b, k, eps, nu, kk, bb)
     if UNROLL:
-        [s[Y].unroll(ax) for ax in [eps, nu]]
+        [s[Y].unroll(ax) for ax in [eps, nu, kk]]
 
     if VECTORIZE:
         s[Y].vectorize(bb)
@@ -524,7 +526,7 @@ def schedule_winograd(cfg, output, VK, VP):
     (k, b, eps, nu, kk, bb) = M.op.axis
     if cfg['V_COMPUTE_AT'].val:
         s[V].compute_at(s[M], b)
-
+    s[M].reorder(b, k, eps, nu, kk, bb)
     if TENSORIZE and VK == MTile and VP == NTile:
         K = get_const_int(M.op.reduce_axis[0].dom.extent)
         s[M].tensorize(kk, intrin_gemm(M=MTile, N=NTile, K=K))

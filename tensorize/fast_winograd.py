@@ -309,11 +309,11 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('unroll', [1])
     cfg.define_knob('compute_at', [0])
     cfg.define_knob('vectorize', [1])
-    cfg.define_knob('tensorize', [0])
-    cfg.define_knob('VK', [2, 4, 8])
-    cfg.define_knob('VP', [8, 16])
+    cfg.define_knob('tensorize', [1])
+    cfg.define_knob('VK', [4])
+    cfg.define_knob('VP', [16])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
-        cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [0, 1])
+        cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [1])
     for intermediate in ["input_tile", "B_T_dot_X", "V"]:
         cfg.define_knob("{}_REORDER_C".format(intermediate), [0, 1])
 
@@ -328,7 +328,7 @@ def conv2d_winograd_autotvm(s, ic, oc):
     s = simple_winograd.schedule_winograd(cfg, output, VK=VK, VP=VP)
     if cfg.flop == 0:
         cfg.add_flop(2 * ic * oc * s * s * 3 * 3)
-    # print(tvm.lower(s, [X, W, output], simple_mode=True))
+    print(tvm.lower(s, [X, W, output], simple_mode=True))
     return s, [X, W, output]
 
 
@@ -371,10 +371,10 @@ for i, w in enumerate(WORKLOADS):
     print(task.config_space)
     tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
     job_name = 'conv2d_minimal_winograd_{w.space}_{w.input_channel}_{w.output_channel}'.format(w=w)
-    try:
-        tuner.load_history(autotvm.record.load_from_file("{}.log".format(job_name)))
-    except Exception as e:
-        logging.exception("Failed to load history file")
+    # try:
+    #     tuner.load_history(autotvm.record.load_from_file("{}.log".format(job_name)))
+    # except Exception as e:
+    #     logging.exception("Failed to load history file")
     n_trial = 500
     tuner.tune(
         n_trial=n_trial,

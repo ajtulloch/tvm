@@ -371,6 +371,8 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
 
 def schedule_winograd(cfg, output, VK, VP):
     s = tvm.create_schedule(output.op)
+    if not cfg:
+        return s
     Y = output.op.input_tensors[0]
     A_T_dot_M = Y.op.input_tensors[0]
     M = A_T_dot_M.op.input_tensors[0]
@@ -387,8 +389,8 @@ def schedule_winograd(cfg, output, VK, VP):
     if cfg['vectorize']:
         (b, c, eps, nu, bb) = input_tile.op.axis
         s[input_tile].vectorize(bb)
-    # if autotvm.GLOBAL_SCOPE.in_tuning:
-    #     s[input_tile].pragma(b, 'debug_skip_region')
+    if autotvm.GLOBAL_SCOPE.in_tuning:
+        s[input_tile].pragma(b, 'debug_skip_region')
     # s[input_tile].compute_inline()
 
     # transform kernel
@@ -438,7 +440,6 @@ def schedule_winograd(cfg, output, VK, VP):
 
     if cfg['A_T_dot_M_COMPUTE_AT'].val:
         s[A_T_dot_M].compute_at(s[Y], b)
-
 
     # Schedule V
     (b, c, eps, nu, bb) = B_T_dot_X.op.axis

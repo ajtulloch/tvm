@@ -323,7 +323,8 @@ def conv2d_winograd_autotvm(workload):
 
     output = simple_winograd.decl_winograd(cfg, X, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", VK=VK, VP=VP)
     s = simple_winograd.schedule_winograd(cfg, output, VK=VK, VP=VP)
-    cfg.add_flop(2 * workload.input_channel * workload.output_channel * workload.space * workload.space * 3 * 3)
+    if cfg.flop == 0:
+        cfg.add_flop(2 * workload.input_channel * workload.output_channel * workload.space * workload.space * 3 * 3)
     # print(tvm.lower(s, [X, W, output], simple_mode=True))
     return s, [X, W, output]
 
@@ -334,10 +335,13 @@ import sys
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 WORKLOADS = [
-        Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
-        Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+        # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+        Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
         Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+
+        # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
         # Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
         # Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
         # Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),

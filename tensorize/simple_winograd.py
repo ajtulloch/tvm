@@ -379,11 +379,16 @@ def schedule_winograd(cfg, output, VK, VP):
     input_tile = B_T_dot_X.op.input_tensors[0]
     data_pad = input_tile.op.input_tensors[0]
     # padding
-    # [data_pad].compute_inline()
+    if cfg['data_pad_inline'].val:
+        s[data_pad].compute_inline()
 
     # pack input tiles
-    (b, c, eps, nu, bb) = input_tile.op.axis
-    s[input_tile].vectorize(bb)
+
+    if cfg['vectorize']:
+        (b, c, eps, nu, bb) = input_tile.op.axis
+        s[input_tile].vectorize(bb)
+    # if autotvm.GLOBAL_SCOPE.in_tuning:
+    #     s[input_tile].pragma(b, 'debug_skip_region')
     # s[input_tile].compute_inline()
 
     # transform kernel
@@ -406,16 +411,9 @@ def schedule_winograd(cfg, output, VK, VP):
             # this part to make tuning records correct
             s[U].pragma(k, 'debug_skip_region')
 
-    UNROLL = True
-    COMPUTE_AT = False
-    VECTORIZE = True
-    TENSORIZE = False
-
-    if cfg:
-        UNROLL = cfg['unroll'].val
-        COMPUTE_AT = cfg['compute_at'].val
-        VECTORIZE = cfg['vectorize'].val
-        TENSORIZE = cfg['tensorize'].val
+    UNROLL = cfg['unroll'].val
+    VECTORIZE = cfg['vectorize'].val
+    TENSORIZE = cfg['tensorize'].val
     # if autotvm.GLOBAL_SCOPE.in_tuning:
     #     # kernel transformation will be pre-computed during compilation, so we skip
     #     # this part to make tuning records correct
@@ -428,7 +426,7 @@ def schedule_winograd(cfg, output, VK, VP):
     if VECTORIZE:
         s[A_T_dot_M].vectorize(bb)
 
-    if COMPUTE_AT:
+    if cfg['M_COMPUTE_AT'].val:
         s[M].compute_at(s[A_T_dot_M], b)
 
     (k, b, eps, nu, kk, bb) = Y.op.axis
@@ -438,7 +436,7 @@ def schedule_winograd(cfg, output, VK, VP):
     if VECTORIZE:
         s[Y].vectorize(bb)
 
-    if COMPUTE_AT:
+    if cfg['A_T_dot_M_COMPUTE_AT'].val:
         s[A_T_dot_M].compute_at(s[Y], b)
 
 
@@ -448,7 +446,7 @@ def schedule_winograd(cfg, output, VK, VP):
         [s[B_T_dot_X].unroll(ax) for ax in [eps, nu]]
     if VECTORIZE:
         s[B_T_dot_X].vectorize(bb)
-    if COMPUTE_AT:
+    if cfg['input_tile_COMPUTE_AT'].val:
         s[input_tile].compute_at(s[B_T_dot_X], b)
 
     (b, eps, nu, c, bb) = V.op.axis
@@ -456,13 +454,11 @@ def schedule_winograd(cfg, output, VK, VP):
         [s[V].unroll(ax) for ax in [eps, nu]]
     if VECTORIZE:
         s[V].vectorize(bb)
-    if COMPUTE_AT:
-        input_tile_cache = s.cache_read(input_tile, 'global', [B_T_dot_X])
-        s[input_tile_cache].compute_at(s[B_T_dot_X], B_T_dot_X.op.axis[0])
+    if cfg['B_T_dot_X_COMPUTE_AT'].val:
         s[B_T_dot_X].compute_at(s[V], b)
 
     (k, b, eps, nu, kk, bb) = M.op.axis
-    if COMPUTE_AT:
+    if cfg['V_COMPUTE_AT'].val:
         s[V].compute_at(s[M], b)
     if TENSORIZE and VK == MTile and VP == NTile:
         K = get_const_int(M.op.reduce_axis[0].dom.extent)

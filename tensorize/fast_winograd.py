@@ -304,27 +304,30 @@ def output_transform_autotvm(dtype):
 Workload = collections.namedtuple("Workload", ["space", "input_channel", "output_channel", "kernel", "pad", "stride"])
 
 @autotvm.template
-def conv2d_winograd_autotvm(workload):
+def conv2d_winograd_autotvm(s, ic, oc):
     cfg = autotvm.get_config()
     cfg.define_knob('unroll', [1])
     cfg.define_knob('compute_at', [0])
     cfg.define_knob('vectorize', [1])
-    cfg.define_knob('tensorize', [1])
-    cfg.define_knob('VK', [4])
-    cfg.define_knob('VP', [24])
+    cfg.define_knob('tensorize', [0])
+    cfg.define_knob('VK', [2, 4, 8])
+    cfg.define_knob('VP', [8, 16])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
         cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [0, 1])
+    for intermediate in ["input_tile", "B_T_dot_X", "V"]:
+        cfg.define_knob("{}_REORDER_C".format(intermediate), [0, 1])
+
     cfg.define_knob('data_pad_inline', [0, 1])
 
     VK = cfg['VK'].val
     VP = cfg['VP'].val
-    X = tvm.placeholder(shape=(1, workload.input_channel, workload.space, workload.space), dtype="float32", name="X")
-    W = tvm.placeholder(shape=(workload.output_channel, workload.input_channel, 3, 3), dtype="float32", name="W")
+    X = tvm.placeholder(shape=(1, ic, s, s), dtype="float32", name="X")
+    W = tvm.placeholder(shape=(oc, ic, 3, 3), dtype="float32", name="W")
 
     output = simple_winograd.decl_winograd(cfg, X, W, strides=1, padding=1, layout="NCHW", out_dtype="float32", VK=VK, VP=VP)
     s = simple_winograd.schedule_winograd(cfg, output, VK=VK, VP=VP)
     if cfg.flop == 0:
-        cfg.add_flop(2 * workload.input_channel * workload.output_channel * workload.space * workload.space * 3 * 3)
+        cfg.add_flop(2 * ic * oc * s * s * 3 * 3)
     # print(tvm.lower(s, [X, W, output], simple_mode=True))
     return s, [X, W, output]
 
@@ -335,7 +338,7 @@ import sys
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 WORKLOADS = [
-        # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+        Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
         # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
         # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
         Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
@@ -363,11 +366,19 @@ for i, w in enumerate(WORKLOADS):
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,
-        args=(w,),
+        args=(w.space, w.input_channel, w.output_channel),
         target=tvm.target.create('llvm -mcpu=core-avx2'))
     print(task.config_space)
     tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
+    job_name = 'conv2d_minimal_winograd_{w.space}_{w.input_channel}_{w.output_channel}'.format(w=w)
+    try:
+        tuner.load_history(autotvm.record.load_from_file("{}.log".format(job_name)))
+    except Exception as e:
+        logging.exception("Failed to load history file")
+    n_trial = 500
     tuner.tune(
-        n_trial=200,
+        n_trial=n_trial,
         measure_option=measure_option,
-        callbacks=[autotvm.callback.log_to_file('conv2d_minimal_winograd_{w.space}_{w.input_channel}_{w.output_channel}.log'.format(w=w))])
+        callbacks=[
+            autotvm.callback.progress_bar(n_trial, prefix=job_name),
+            autotvm.callback.log_to_file('{}.log'.format(job_name))])

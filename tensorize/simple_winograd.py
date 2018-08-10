@@ -8,6 +8,8 @@ from tvm import autotvm
 
 
 MTile = 4
+NTupleTile = 3
+TupleTile = 8
 MMTile = 4
 NTile = 24
 KTile = 256
@@ -98,6 +100,57 @@ def intrin_gemm(M, N, K):
                                       intrin_func,
                                       binds={A: Ab, B: Bb, C: Cb})
 
+# Tensorized
+def intrin_tuple_gemm(M, N, K, T):
+    assert M == MTile
+    assert N == NTupleTile
+    assert T == TupleTile
+    dtype = 'float32'
+    A = tvm.placeholder((K, M, T), dtype=dtype, name='A')
+    B = tvm.placeholder((K, N, T), dtype=dtype, name='B')
+    k = tvm.reduce_axis((0, K), name='k')
+    C = tvm.compute((M, N, T), lambda m, n, t:
+                    tvm.sum(A[k, m, t] * B[k, n, t], axis=[k]), name='C')
+
+    Ab = tvm.decl_buffer(A.shape, A.dtype,
+                        name="A",
+                        offset_factor=MTile,
+                        strides=[M * T, T, 1])
+    Bb = tvm.decl_buffer(B.shape, B.dtype,
+                        name="B",
+                        offset_factor=NTile,
+                        strides=[N * T, T, 1])
+    Cb = tvm.decl_buffer(C.shape, C.dtype,
+                        name="C",
+                        offset_factor=1,
+                        strides=[tvm.var('ldc'), T, 1])
+
+    def intrin_func(ins, outs):
+        aa, bb = ins
+        cc = outs[0]
+
+        def body():
+            irb = tvm.ir_builder.create()
+            extern_call = tvm.call_extern(
+                "int32",
+                "tuple_sgemm_compute_{MTile}x{NTupleTile}x{TupleTile}__{ARCH}".format(**globals()),
+                K,
+                irb.buffer_ptr(aa),
+                aa.elem_offset,
+                irb.buffer_ptr(bb),
+                bb.elem_offset,
+                irb.buffer_ptr(cc),
+                cc.elem_offset,
+                cc.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+        return body()
+
+    with tvm.build_config():
+        return tvm.decl_tensor_intrin(C.op,
+                                      intrin_func,
+                                      binds={A: Ab, B: Bb, C: Cb})
+
 def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, VP=8):
     # return _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype)
     N, CI, IH, IW = get_const_tuple(data.shape)
@@ -152,7 +205,6 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
     def round_up(a, b): return ((a + b - 1) // b) * b
     K = round_up(CO, VK)
     P = round_up(N * nH * nW, VP)
-    print("nH: {}, nW: {}, P: {}, K: {}, VP: {}, VK: {}".format(nH, nW, P, K, VP, VK))
 
     assert K % VK == 0
     assert P % VP == 0
@@ -381,13 +433,21 @@ def schedule_winograd(cfg, output, VK, VP):
     input_tile = B_T_dot_X.op.input_tensors[0]
     data_pad = input_tile.op.input_tensors[0]
     # padding
+
+    UNROLL = cfg['unroll'].val
+    VECTORIZE = cfg['vectorize'].val
+    TENSORIZE = cfg['tensorize'].val
+
     if cfg['data_pad_inline'].val:
         s[data_pad].compute_inline()
 
     # pack input tiles
-
-    if cfg['vectorize']:
-        (b, c, eps, nu, bb) = input_tile.op.axis
+    (b, c, eps, nu, bb) = input_tile.op.axis
+    if cfg['input_tile_REORDER_C'].val:
+        s[input_tile].reorder(b, eps, nu, c, bb)
+    if UNROLL:
+        [s[input_tile].unroll(ax) for ax in [eps, nu]]
+    if VECTORIZE:
         s[input_tile].vectorize(bb)
     if autotvm.GLOBAL_SCOPE.in_tuning:
         s[input_tile].pragma(b, 'debug_skip_region')
@@ -413,9 +473,6 @@ def schedule_winograd(cfg, output, VK, VP):
             # this part to make tuning records correct
             s[U].pragma(k, 'debug_skip_region')
 
-    UNROLL = cfg['unroll'].val
-    VECTORIZE = cfg['vectorize'].val
-    TENSORIZE = cfg['tensorize'].val
     # if autotvm.GLOBAL_SCOPE.in_tuning:
     #     # kernel transformation will be pre-computed during compilation, so we skip
     #     # this part to make tuning records correct
@@ -430,7 +487,6 @@ def schedule_winograd(cfg, output, VK, VP):
 
     if cfg['M_COMPUTE_AT'].val:
         s[M].compute_at(s[A_T_dot_M], b)
-
     (k, b, eps, nu, kk, bb) = Y.op.axis
     if UNROLL:
         [s[Y].unroll(ax) for ax in [eps, nu]]
@@ -447,6 +503,10 @@ def schedule_winograd(cfg, output, VK, VP):
         [s[B_T_dot_X].unroll(ax) for ax in [eps, nu]]
     if VECTORIZE:
         s[B_T_dot_X].vectorize(bb)
+
+    if cfg['B_T_dot_X_REORDER_C'].val:
+        s[B_T_dot_X].reorder(b, eps, nu, c, bb)
+
     if cfg['input_tile_COMPUTE_AT'].val:
         s[input_tile].compute_at(s[B_T_dot_X], b)
 
@@ -455,12 +515,16 @@ def schedule_winograd(cfg, output, VK, VP):
         [s[V].unroll(ax) for ax in [eps, nu]]
     if VECTORIZE:
         s[V].vectorize(bb)
+    if cfg['V_REORDER_C'].val:
+        s[V].reorder(b, eps, nu, c, bb)
+
     if cfg['B_T_dot_X_COMPUTE_AT'].val:
         s[B_T_dot_X].compute_at(s[V], b)
 
     (k, b, eps, nu, kk, bb) = M.op.axis
     if cfg['V_COMPUTE_AT'].val:
         s[V].compute_at(s[M], b)
+
     if TENSORIZE and VK == MTile and VP == NTile:
         K = get_const_int(M.op.reduce_axis[0].dom.extent)
         s[M].tensorize(kk, intrin_gemm(M=MTile, N=NTile, K=K))

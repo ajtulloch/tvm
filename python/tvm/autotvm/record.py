@@ -230,7 +230,8 @@ def pick_best(in_file, out_file):
     out_file: str or file
         The filename of output
     """
-    best_context = ApplyHistoryBest(load_from_file(in_file))
+    records = list(load_from_file(in_file))
+    best_context = ApplyHistoryBest(records)
     best_set = set()
 
     for v in best_context.best_by_model.values():
@@ -241,8 +242,7 @@ def pick_best(in_file, out_file):
 
     logger.info("Extract %d best records from the %s", len(best_set), in_file)
     fout = open(out_file, 'w') if isinstance(out_file, str) else out_file
-
-    for inp, res in load_from_file(in_file):
+    for inp, res in records:
         if measure_str_key(inp) in best_set:
             fout.write(encode(inp, res) + "\n")
             best_set.remove(measure_str_key(inp))

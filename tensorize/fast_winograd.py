@@ -310,10 +310,10 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('compute_at', [0])
     cfg.define_knob('vectorize', [1])
     cfg.define_knob('tensorize', [1])
-    cfg.define_knob('VK', [4, 5, 6])
-    cfg.define_knob('VP', [16, 24])
+    cfg.define_knob('VK', [6])
+    cfg.define_knob('VP', [8])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
-        cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [1])
+        cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [0, 1])
     for intermediate in ["input_tile", "V"]: # , "B_T_dot_X",
         cfg.define_knob("{}_REORDER_C".format(intermediate), [0, 1])
 
@@ -328,7 +328,7 @@ def conv2d_winograd_autotvm(s, ic, oc):
     s = simple_winograd.schedule_winograd(cfg, output, VK=VK, VP=VP)
     if cfg.flop == 0:
         cfg.add_flop(2 * ic * oc * s * s * 3 * 3)
-    print(tvm.lower(s, [X, W, output], simple_mode=True))
+    #print(tvm.lower(s, [X, W, output], simple_mode=True))
     return s, [X, W, output]
 
 
@@ -338,40 +338,43 @@ import sys
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
 
 WORKLOADS = [
-        Workload(space=102, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
-        # Workload(space=102, input_channel=32, output_channel=32, kernel=3, pad=1, stride=1),
-        # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
-        # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # Workload(space=102, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # # Workload(space=102, input_channel=32, output_channel=32, kernel=3, pad=1, stride=1),
+        # # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+        # # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+        # # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+        # # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+        # Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
         # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
-        # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
-        Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
 
-        # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        # Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
-        # Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
-        # Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
-        # Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
-        # Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
-        # Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
-        # Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
-        # Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
-        # Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
-        # Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
-        # Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
-        # Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
+        # # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
+        Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
+        Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
+        Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
+        Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
+        Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
+        Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
+        Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
+        Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
+        Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
+        Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
 ]
 
 for i, w in enumerate(WORKLOADS):
+    print(w)
     measure_option = autotvm.measure_option(
-        measure_func='local',
-        number=50)
+        measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
+        # measure_func='local',
+        parallel_num=5,
+        number=100)
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,
         args=(w.space, w.input_channel, w.output_channel),
-        target=tvm.target.create('llvm -mcpu=core-avx2'))
+        target=tvm.target.rasp())
     print(task.config_space)
     tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
     job_name = 'conv2d_minimal_winograd_{w.space}_{w.input_channel}_{w.output_channel}'.format(w=w)
@@ -380,9 +383,11 @@ for i, w in enumerate(WORKLOADS):
     # except Exception as e:
     #     logging.exception("Failed to load history file")
     n_trial = 500
+    early_stopping = 50
     tuner.tune(
         n_trial=n_trial,
+        early_stopping=early_stopping,
         measure_option=measure_option,
         callbacks=[
             autotvm.callback.progress_bar(n_trial, prefix=job_name),
-            autotvm.callback.log_to_file('{}.log'.format(job_name))])
+            autotvm.callback.log_to_file('{}__neon.log'.format(job_name))])

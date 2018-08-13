@@ -39,6 +39,8 @@ if __name__ == '__main__':
             os.remove(tmp_filename)
             logging.info("Output to %s ...", args.o)
         else:
-            raise ValueError("Invalid input file: " + args.i)
+            args.o = args.o or args.i + ".best.log"
+            autotvm.record.pick_best(args.i, args.o)
+            # raise ValueError("Invalid input file: " + args.i)
     else:
         raise ValueError("Invalid action " + args.act)

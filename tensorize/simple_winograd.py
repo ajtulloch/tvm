@@ -8,15 +8,12 @@ from tvm import autotvm
 
 
 MNTiles = [
-    (4, 24),
-    (4, 16),
-    (5, 16),
-    (6, 16),
+    (6, 8)
 ]
 KTile = 256
-ARCH = "avx2"
+ARCH = "neon"
 BITCODE_PATHS = [
-    "tensorize/gemm__avx2.bc"
+    "tensorize/gemm__neon.bc"
 ]
 
 @tvm.register_func("tvm_callback_llvm_bitcode_path")

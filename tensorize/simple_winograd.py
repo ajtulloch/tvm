@@ -11,6 +11,7 @@ MNTiles = [
     (4, 24),
     (4, 16),
     (5, 16),
+    (6, 16),
 ]
 KTile = 256
 ARCH = "avx2"
@@ -479,10 +480,6 @@ def schedule_winograd(cfg, output, VK, VP):
     if cfg['V_COMPUTE_AT'].val:
         s[V].compute_at(s[M], b)
     s[M].reorder(b, k, eps, nu, kk, bb)
-    if TENSORIZE and (VK, VP) in MNTiles:
-        K = get_const_int(M.op.reduce_axis[0].dom.extent)
-        s[M].tensorize(kk, intrin_gemm(M=VK, N=VP, K=K))
-    elif VECTORIZE:
-        s[M].vectorize(bb)
-
+    K = get_const_int(M.op.reduce_axis[0].dom.extent)
+    s[M].tensorize(kk, intrin_gemm(M=VK, N=VP, K=K))
     return s

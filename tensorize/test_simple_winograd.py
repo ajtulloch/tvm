@@ -89,12 +89,12 @@ def test_conv2d_nhwc():
          'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
     WL = [
         Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
         Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
         Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),

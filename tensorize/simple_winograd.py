@@ -7,11 +7,11 @@ import tvm
 from tvm import autotvm
 
 
-MTile = (4, )
-NTupleTile = 3
-TupleTile = 8
-MMTile = 4
-NTile = (24, 16, 8)
+MNTiles = [
+    (4, 24),
+    (4, 16),
+    (5, 16),
+]
 KTile = 256
 ARCH = "avx2"
 BITCODE_PATHS = [
@@ -25,8 +25,7 @@ def bitcode_paths():
 
 # Tensorized
 def intrin_gemm(M, N, K):
-    assert M in MTile, M
-    assert N in NTile, N
+    assert (M, N) in MNTiles, (M, N)
     dtype = 'float32'
     A = tvm.placeholder((K, M), dtype=dtype, name='A')
     B = tvm.placeholder((K, N), dtype=dtype, name='B')
@@ -480,7 +479,7 @@ def schedule_winograd(cfg, output, VK, VP):
     if cfg['V_COMPUTE_AT'].val:
         s[V].compute_at(s[M], b)
     s[M].reorder(b, k, eps, nu, kk, bb)
-    if TENSORIZE and VK in MTile and VP in NTile:
+    if TENSORIZE and (VK, VP) in MNTiles:
         K = get_const_int(M.op.reduce_axis[0].dom.extent)
         s[M].tensorize(kk, intrin_gemm(M=VK, N=VP, K=K))
     elif VECTORIZE:

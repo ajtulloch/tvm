@@ -8,6 +8,7 @@ from tvm import autotvm
 
 
 MNTiles = [
+    (4, 12),
     (6, 8)
 ]
 KTile = 256

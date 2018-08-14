@@ -4,6 +4,66 @@
 #include <stdio.h>
 #include <string.h>
 
+void sgemm_compute_4x12__neon(int32_t k, const float *a, int32_t a_off,
+                             const float *b, int32_t b_off, float *c,
+                             int32_t c_off, int32_t ldc) {
+  a = a + a_off;
+  b = b + b_off;
+  c = c + c_off;
+  size_t k_size_t = k;
+  // We offset ldc by 4 because we pre-increment by 4 elements to begin with.
+  size_t ldc_size_t = ldc - 4;
+  asm volatile("	VMOV.I32  q4, #0\n\t"
+               "	VMOV.I32  q5, #0\n\t"
+               "	VMOV.I32  q6, #0\n\t"
+               "	VMOV.I32  q7, #0\n\t"
+               "	VMOV.I32  q8, #0\n\t"
+               "	VMOV.I32  q9, #0\n\t"
+               "	VMOV.I32 q10, #0\n\t"
+               "	VMOV.I32 q11, #0\n\t"
+               "	VMOV.I32 q12, #0\n\t"
+               "	VMOV.I32 q13, #0\n\t"
+               "	VMOV.I32 q14, #0\n\t"
+               "	VMOV.I32 q15, #0\n\t"
+               "0:\n\t"
+               "	VLD1.32 {d2-d5}, [%[b]]!\n\t"
+               "	VLD1.32 {d6-d7}, [%[b]]!\n\t"
+               "	VLD1.32 {d0-d1}, [%[a]]!\n\t"
+               "	VMLA.F32 q4, q1, d0[0]\n\t"
+               "	VMLA.F32 q5, q2, d0[0]\n\t"
+               "	VMLA.F32 q6, q3, d0[0]\n\t"
+               "	VMLA.F32 q7, q1, d0[1]\n\t"
+               "	VMLA.F32 q8, q2, d0[1]\n\t"
+               "	VMLA.F32 q9, q3, d0[1]\n\t"
+               "	VMLA.F32  q10, q1, d1[0]\n\t"
+               "	VMLA.F32  q11, q2, d1[0]\n\t"
+               "	VMLA.F32  q12, q3, d1[0]\n\t"
+               "	VMLA.F32 q13, q1, d1[1]\n\t"
+               "	VMLA.F32 q14, q2, d1[1]\n\t"
+               "	VMLA.F32 q15, q3, d1[1]\n\t"
+               "	SUBS %[k_size_t], %[k_size_t], #1\n\t"
+               "	BNE 0b\n\t"
+               "	LSL %[ldc_size_t], %[ldc_size_t], #2\n\t"
+               "	VST1.32 {d8-d11}, [%[c]]!\n\t"
+               "	VST1.32 {d12-d13}, [%[c]], %[ldc_size_t]\n\t"
+               "	VST1.32 {d14-d17}, [%[c]]!\n\t"
+               "	VST1.32 {d18-d19}, [%[c]], %[ldc_size_t]\n\t"
+               "	VST1.32 {d20-d23}, [%[c]]!\n\t"
+               "	VST1.32 {d24-d25}, [%[c]], %[ldc_size_t]\n\t"
+               "	VST1.32 {d26-d29}, [%[c]]!\n\t"
+               "	VST1.32 {d30-d31}, [%[c]]\n\t"
+               : [c] "+r"(c), [b] "+r"(b), [a] "+r"(a),
+                 [k_size_t] "+r"(k_size_t), [ldc_size_t] "+r"(ldc_size_t)
+               :
+               : "cc", "memory",
+                 // note: someone on internet says that quad registers are
+                 // unsupported in the clobber list!
+                 "d0", "d1", "d2", "d3", "d4", "d5", "d6", "d7", "d8", "d9",
+                 "d10", "d11", "d12", "d13", "d14", "d15", "d16", "d17", "d18",
+                 "d19", "d20", "d21", "d22", "d23", "d24", "d25", "d26", "d27",
+                 "d28", "d29", "d30", "d31");
+}
+
 void sgemm_compute_6x8__neon(int32_t k, const float *a, int32_t a_off,
                              const float *b, int32_t b_off, float *c,
                              int32_t c_off, int32_t ldc) {

@@ -310,8 +310,8 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('compute_at', [0])
     cfg.define_knob('vectorize', [1])
     cfg.define_knob('tensorize', [1])
-    cfg.define_knob('VK', [6])
-    cfg.define_knob('VP', [8])
+    cfg.define_knob('VK', [4])
+    cfg.define_knob('VP', [12])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
         cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [0, 1])
     for intermediate in ["input_tile", "V"]: # , "B_T_dot_X",
@@ -369,7 +369,7 @@ for i, w in enumerate(WORKLOADS):
         measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
         # measure_func='local',
         parallel_num=5,
-        number=100)
+        number=10)
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,

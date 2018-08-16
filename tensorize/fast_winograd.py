@@ -310,17 +310,15 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('compute_at', [0])
     cfg.define_knob('vectorize', [1])
     cfg.define_knob('tensorize', [1])
-    cfg.define_knob('VK', [4])
-    cfg.define_knob('VP', [12])
+    cfg.define_knob('VK,VP', simple_winograd.MNTiles)
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
-        cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [0, 1])
+        cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [1])
     for intermediate in ["input_tile", "V"]: # , "B_T_dot_X",
         cfg.define_knob("{}_REORDER_C".format(intermediate), [0, 1])
 
     cfg.define_knob('data_pad_inline', [0, 1])
 
-    VK = cfg['VK'].val
-    VP = cfg['VP'].val
+    VK, VP = cfg['VK,VP'].val
     X = tvm.placeholder(shape=(1, ic, s, s), dtype="float32", name="X")
     W = tvm.placeholder(shape=(oc, ic, 3, 3), dtype="float32", name="W")
 
@@ -366,15 +364,15 @@ WORKLOADS = [
 for i, w in enumerate(WORKLOADS):
     print(w)
     measure_option = autotvm.measure_option(
-        measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
-        # measure_func='local',
-        parallel_num=5,
+        # measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
+        measure_func='local',
+        parallel_num=1,
         number=10)
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,
         args=(w.space, w.input_channel, w.output_channel),
-        target=tvm.target.rasp())
+        target=tvm.target.create("llvm -mcpu=core-avx2"))
     print(task.config_space)
     tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
     job_name = 'conv2d_minimal_winograd_{w.space}_{w.input_channel}_{w.output_channel}'.format(w=w)
@@ -390,4 +388,4 @@ for i, w in enumerate(WORKLOADS):
         measure_option=measure_option,
         callbacks=[
             autotvm.callback.progress_bar(n_trial, prefix=job_name),
-            autotvm.callback.log_to_file('{}__neon.log'.format(job_name))])
+            autotvm.callback.log_to_file('{}__{}.log'.format(job_name, simple_winograd.ARCH))])

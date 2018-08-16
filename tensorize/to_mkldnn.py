@@ -33,3 +33,57 @@ def format_workload(w, i):
 
 for i, w in enumerate(WORKLOADS):
     print(format_workload(w, i))
+
+import tempfile
+import subprocess
+
+def run_mkl(w, i):
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(format_workload(w, i))
+        f.close()
+        print(f.name)
+        subprocess.check_call(
+            ["/Users/tulloch/src/mkl-dnn/build/tests/benchdnn/benchdnn",
+             "--mode=p",
+             "--conv",
+             "--cfg=f32",
+             "--dir=FWD_I",
+             "--alg=DIRECT",
+             "--batch={}".format(f.name)
+            ])
+
+def run_nnpack(w, i):
+    with tempfile.NamedTemporaryFile(delete=False) as f:
+        f.write(format_workload(w, i))
+        f.close()
+        subprocess.check_call(
+            ["/Users/tulloch/src/NNPACK/build/bench-convolution-inference",
+             "-ic",
+             str(w.input_channel),
+             "-oc",
+             str(w.output_channel),
+             "-is",
+             str(w.space),
+             str(w.space),
+             "-ks",
+             str(w.kernel),
+             str(w.kernel),
+             "-m",
+             "inference",
+             "-a",
+             "wt8x8",
+             "-b",
+             "1",
+             "-t",
+             "0",
+             "-ip",
+             "1",
+             "-ts",
+             "precompute",
+             "-i",
+             "50"
+            ])
+
+for i, w in enumerate(WORKLOADS):
+    # print(run_mkl(w, i))
+    print(run_nnpack(w, i))

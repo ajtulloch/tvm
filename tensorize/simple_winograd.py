@@ -6,14 +6,25 @@ from topi.nn import pad
 import tvm
 from tvm import autotvm
 
+import os
+USE_RASP = bool(int(os.environ.get('USE_RASP', '0')))
 
-MNTiles = [
-    (4, 24),
-    (6, 16),
-    (5, 16),
-]
-KTile = 256
-ARCH = "avx2"
+if USE_RASP:
+    target = tvm.target.rasp()
+    MNTiles = [
+        (6, 8),
+        (4, 12),
+    ]
+    ARCH = "neon"
+else:
+    target = tvm.target.create("llvm -mcpu=core-avx2")
+    MNTiles = [
+        (4, 24),
+        (6, 16),
+        (5, 16),
+    ]
+    ARCH = "avx2"
+
 BITCODE_PATHS = [
     "tensorize/gemm__{ARCH}.bc".format(ARCH=ARCH)
 ]
@@ -110,15 +121,6 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
     assert KH == 3 and KW == 3 and HPAD == 1 and WPAD == 1 and HSTR == 1 and WSTR == 1
     data_pad = pad(data, (0, 0, HPAD, WPAD), name="data_pad")
 
-
-    A_data = np.array(
-        [[1,  1,  1,   1,    1,    32,      32,    0],
-         [0,  1,  -1,  2,   -2,  16,   -16,   0],
-         [0,  1,  1,   4,    4,   8,    8,   0],
-         [0,  1,  -1,  8,   -8,   4,   -4,   0],
-         [0,  1,  1,   16,  16,   2,  2,   0],
-         [0,  1,  -1,  32,  -32,  1,  -1,  1]],
-        dtype=np.float32).T
     G_data = np.array(
         [[1,      0,     0],
          [-2/9,  -2/9,   -2/9],
@@ -129,18 +131,8 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
          [1/45,   -1/90, 1/180],
          [0,      0,     1]],
         dtype=np.float32)
-    B_data = np.array(
-        [[1,   0,    -21/4,    0,    21/4,     0,    -1,  0],
-         [0,   1,      1,    -17/4,  -17/4,    1,    1,   0],
-         [0,   -1,     1,    17/4,   -17/4,   -1,    1,   0],
-         [0,  1/2,    1/4,   -5/2,   -5/4,     2,    1,   0],
-         [0,  -1/2,   1/4,    5/2,   -5/4,    -2,    1,   0],
-         [0,   2,      4,    -5/2,    -5,     1/2,   1,   0],
-         [0,   -2,     4,     5/2,    -5,    -1/2,   1,   0],
-         [0,   -1,     0,    21/4,     0,    -21/4,  0,   1]],
-        dtype=np.float32).T
 
-    m = A_data.shape[1]
+    m = 6
     r = 3
     alpha = m + r - 1
 

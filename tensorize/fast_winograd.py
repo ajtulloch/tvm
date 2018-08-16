@@ -334,45 +334,56 @@ def conv2d_winograd_autotvm(s, ic, oc):
 import logging
 import sys
 logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
-
+# Resnet
 WORKLOADS = [
-        # Workload(space=102, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
-        # # Workload(space=102, input_channel=32, output_channel=32, kernel=3, pad=1, stride=1),
-        # # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
-        # # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
-        # # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        # # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
-        # # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        # Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
-        # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+    # Workload(space=224, input_channel=3, output_channel=64, kernel=3),
+    Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+    Workload(space=56, input_channel=64, output_channel=128, kernel=3, pad=1, stride=1),
+    Workload(space=28, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+    Workload(space=28, input_channel=128, output_channel=256, kernel=3, pad=1, stride=1),
+    Workload(space=14, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+    Workload(space=14, input_channel=256, output_channel=512, kernel=3, pad=1, stride=1),
+    Workload(space=7, input_channel=512, output_channel=512, kernel=3, pad=1, stride=1),
 
-        # # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
-        Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
-        Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
-        Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
-        Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
-        Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
-        Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
 ]
+
+# WORKLOADS = [
+#         # Workload(space=102, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+#         # # Workload(space=102, input_channel=32, output_channel=32, kernel=3, pad=1, stride=1),
+#         # # Workload(space=56, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+#         # # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+#         # # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+#         # # Workload(space=56, input_channel=128, output_channel=128, kernel=3, pad=1, stride=1),
+#         # # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+#         # Workload(space=128, input_channel=64, output_channel=64, kernel=3, pad=1, stride=1),
+#         # Workload(space=56, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+
+#         # # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
+#         Workload(space=192, input_channel=3, output_channel=12, kernel=3, pad=1, stride=1),
+#         Workload(space=96, input_channel=12, output_channel=24, kernel=3, pad=1, stride=1),
+#         Workload(space=48, input_channel=24, output_channel=48, kernel=3, pad=1, stride=1),
+#         Workload(space=24, input_channel=48, output_channel=96, kernel=3, pad=1, stride=1),
+#         Workload(space=12, input_channel=96, output_channel=180, kernel=3, pad=1, stride=1),
+#         Workload(space=6, input_channel=180, output_channel=220, kernel=3, pad=1, stride=1),
+#         Workload(space=6, input_channel=220, output_channel=180, kernel=3, pad=1, stride=1),
+#         Workload(space=12, input_channel=180, output_channel=96, kernel=3, pad=1, stride=1),
+#         Workload(space=24, input_channel=96, output_channel=48, kernel=3, pad=1, stride=1),
+#         Workload(space=48, input_channel=48, output_channel=24, kernel=3, pad=1, stride=1),
+#         Workload(space=96, input_channel=24, output_channel=12, kernel=3, pad=1, stride=1),
+#         Workload(space=192, input_channel=12, output_channel=1, kernel=3, pad=1, stride=1),
+# ]
 
 for i, w in enumerate(WORKLOADS):
     print(w)
     measure_option = autotvm.measure_option(
-        # measure_func=autotvm.use_rpc("rpi", host="localhost", port=9190),
-        measure_func='local',
+        measure_func='local' if not simple_winograd.USE_RASP else autotvm.use_rpc("rpi", host="localhost", port=9190),
         parallel_num=1,
         number=10)
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,
         args=(w.space, w.input_channel, w.output_channel),
-        target=tvm.target.create("llvm -mcpu=core-avx2"))
+        target=simple_winograd.target)
     print(task.config_space)
     tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
     job_name = 'conv2d_minimal_winograd_{w.space}_{w.input_channel}_{w.output_channel}'.format(w=w)

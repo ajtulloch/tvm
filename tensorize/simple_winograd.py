@@ -168,7 +168,7 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
                              lambda b, c, eps, nu, bb:
                              data_pad[(b*VP+bb) // (nH*nW)][c][(b*VP+bb) // nW % nH * m + eps]
                              [(b*VP+bb) % nW * m + nu],
-                             name='d')
+                             name='input_tile')
 
     def compute_B_T_dot_X(b, c, eps, nu, bb):
         temp_expr = {}
@@ -382,20 +382,15 @@ def schedule_winograd(cfg, output, VK, VP):
     VECTORIZE = cfg['vectorize'].val
     TENSORIZE = cfg['tensorize'].val
 
-    if cfg['data_pad_inline'].val:
-        s[data_pad].compute_inline()
+    # if cfg['data_pad_inline'].val:
+    #     s[data_pad].compute_inline()
+    # if VECTORIZE:
+    #     s[input_tile].vectorize(bb)
 
-    # pack input tiles
-    (b, c, eps, nu, bb) = input_tile.op.axis
-    if cfg['input_tile_REORDER_C'].val:
-        s[input_tile].reorder(b, eps, nu, c, bb)
-    if UNROLL:
-        [s[input_tile].unroll(ax) for ax in [eps, nu]]
-    if VECTORIZE:
-        s[input_tile].vectorize(bb)
-    if autotvm.GLOBAL_SCOPE.in_tuning:
-        s[input_tile].pragma(b, 'debug_skip_region')
-        s[data_pad].pragma(data_pad.op.axis[0], 'debug_skip_region')
+
+    # if autotvm.GLOBAL_SCOPE.in_tuning:
+    #     s[input_tile].pragma(b, 'debug_skip_region')
+    #     s[data_pad].pragma(data_pad.op.axis[0], 'debug_skip_region')
     # s[input_tile].compute_inline()
 
     # transform kernel
@@ -453,9 +448,6 @@ def schedule_winograd(cfg, output, VK, VP):
     # if cfg['B_T_dot_X_REORDER_C'].val:
     #     s[B_T_dot_X].reorder(b, eps, nu, c, bb)
 
-    if cfg['input_tile_COMPUTE_AT'].val:
-        s[input_tile].compute_at(s[B_T_dot_X], b)
-
     (b, eps, nu, c, bb) = V.op.axis
     if UNROLL:
         [s[V].unroll(ax) for ax in [eps, nu]]
@@ -473,4 +465,19 @@ def schedule_winograd(cfg, output, VK, VP):
     s[M].reorder(b, k, eps, nu, kk, bb)
     K = get_const_int(M.op.reduce_axis[0].dom.extent)
     s[M].tensorize(kk, intrin_gemm(M=VK, N=VP, K=K))
+
+    s[data_pad].compute_inline()
+    s[input_tile].compute_inline()
+
+    input_tile_cache = s.cache_read(input_tile, 'global', [B_T_dot_X])
+    s[input_tile_cache].compute_at(s[B_T_dot_X], B_T_dot_X.op.axis[0])
+
+    # pack input tiles
+    (b, c, eps, nu, bb) = input_tile_cache.op.axis
+    import ipdb; ipdb.set_trace()
+    if cfg['input_tile_REORDER_C'].val:
+        s[input_tile_cache].reorder(b, eps, nu, c, bb)
+    if UNROLL:
+        [s[input_tile_cache].unroll(ax) for ax in [eps, nu]]
+
     return s

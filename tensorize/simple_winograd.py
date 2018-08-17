@@ -164,10 +164,11 @@ def decl_winograd(cfg, data, kernel, strides, padding, layout, out_dtype, VK=8, 
 
 
     # pack input tile
+    (d0, d1, d2, d3) = get_const_tuple(data_pad.shape)
     input_tile = tvm.compute((P // VP, C, alpha, alpha, VP),
                              lambda b, c, eps, nu, bb:
                              data_pad[(b*VP+bb) // (nH*nW)][c][(b*VP+bb) // nW % nH * m + eps]
-                             [(b*VP+bb) % nW * m + nu],
+                             [(b*VP+bb) % nW * m + nu] + tvm.const(0, data_pad.dtype) * data_pad[d0 - 1, d1 - 1, d2 - 1, d3 - 1],
                              name='input_tile')
 
     def compute_B_T_dot_X(b, c, eps, nu, bb):
@@ -466,18 +467,35 @@ def schedule_winograd(cfg, output, VK, VP):
     K = get_const_int(M.op.reduce_axis[0].dom.extent)
     s[M].tensorize(kk, intrin_gemm(M=VK, N=VP, K=K))
 
-    s[data_pad].compute_inline()
+
     s[input_tile].compute_inline()
-
+    s[data_pad].compute_inline()
     input_tile_cache = s.cache_read(input_tile, 'global', [B_T_dot_X])
-    s[input_tile_cache].compute_at(s[B_T_dot_X], B_T_dot_X.op.axis[0])
-
-    # pack input tiles
     (b, c, eps, nu, bb) = input_tile_cache.op.axis
-    import ipdb; ipdb.set_trace()
-    if cfg['input_tile_REORDER_C'].val:
-        s[input_tile_cache].reorder(b, eps, nu, c, bb)
-    if UNROLL:
-        [s[input_tile_cache].unroll(ax) for ax in [eps, nu]]
+    s[input_tile_cache].reorder(b, c, eps, bb, nu)
+    # s[input_tile_cache].unroll(bb)
+    # input_tile_cache_2 = s.cache_write(input_tile_cache, 'global')
+    # s[input_tile_cache].compute_inline()
 
+    s[input_tile_cache].compute_at(s[B_T_dot_X], B_T_dot_X.op.axis[0])
+    # s[input_tile_cache_2].compute_at(s[B_T_dot_X], B_T_dot_X.op.axis[0])
+    # s[input_tile_cache_2].vectorize(list(input_tile_cache_2.op.axis)[-1])
+
+    # data_pad_cache = s.cache_read(data_pad, 'global', [input_tile])
+    # s[data_pad_cache].compute_at(s[input_tile])
+
+    # # pack input tiles
+    # (b, c, eps, nu, bb) = input_tile_cache.op.axis
+    # # import ipdb; ipdb.set_trace()
+    # if cfg['input_tile_REORDER_C'].val:
+    #     s[input_tile_cache].reorder(b, eps, nu, c, bb)
+    # if UNROLL:
+    #     [s[input_tile_cache].unroll(ax) for ax in [eps, nu]]
+    if autotvm.GLOBAL_SCOPE.in_tuning:
+        pass
+        # kernel transformation will be pre-computed during compilation, so we skip
+        # this part to make tuning records correct
+        # s[input_tile_cache].pragma(input_tile_cache.op.axis[0], 'debug_skip_region')
+        # s[input_tile_cache_2].pragma(input_tile_cache_2.op.axis[0], 'debug_skip_region')
+        # s[data_pad].pragma(input_tile.op.axis[0], 'debug_skip_region')
     return s

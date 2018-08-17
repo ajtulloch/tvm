@@ -60,7 +60,7 @@ def run_mkl(w, i):
                  "--conv",
                  "--cfg=f32",
                  "--dir=FWD_I",
-                 "--alg=WINO",
+                 "--alg=DIRECT",
                  "--batch={}".format(f.name)
                 ])
         except:
@@ -100,5 +100,5 @@ def run_nnpack(w, i):
             ])
 
 for i, w in enumerate(WORKLOADS):
-    print(run_mkl(w, i))
-    # print(run_nnpack(w, i))
+    # print(run_mkl(w, i))
+    print(run_nnpack(w, i))

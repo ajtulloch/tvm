@@ -33,7 +33,8 @@ def _get_default_schedule(wkl, simd_width):
     for ow_factor in range(out_width, 0, -1):
         if out_width % ow_factor == 0:
             for oh_factor in range(out_height, 0, -1):
-                if out_height % oh_factor == 0 and ow_factor * oh_factor < 32:
+                if out_height % oh_factor == 0:
+                    print("OH Factor", oh_factor, ow_factor)
                     return AVXConv1x1Fwd(ic_bn, oc_bn, oh_factor, ow_factor)
 
     raise ValueError("cannot decide default schedule for workload: {}".format(wkl))

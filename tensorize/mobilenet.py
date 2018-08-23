@@ -13,14 +13,14 @@ import logging
 import topi.x86
 import topi.nn
 
-USE_RASP = True
+USE_RASP = False
 
 if not USE_RASP:
     target = tvm.target.create('llvm -mcpu=core-avx2')
-    ctx = tvm.context(target, 0)
+    ctx = tvm.context(str(target), 0)
 else:
     target = tvm.target.rasp()
-    remote = tvm.rpc.connect('localhost', 9090)
+    remote = tvm.rpc.connect('localhost', 9099)
     ctx = remote.cpu(0)
 
 import mxnet as mx
@@ -166,7 +166,9 @@ def main():
         help="The model type.")
     parser.add_argument('--opt-level', type=int, default=1, help="Level of optimization.")
     parser.add_argument('--num-iter', type=int, default=50, help="Number of iteration during benchmark.")
+    print("parsing")
     args = parser.parse_args()
+    print(args)
     logging.basicConfig(level=logging.DEBUG)
     opt_level = args.opt_level
 

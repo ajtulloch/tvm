@@ -310,12 +310,13 @@ def conv2d_winograd_autotvm(s, ic, oc):
     cfg.define_knob('compute_at', [0])
     cfg.define_knob('vectorize', [1])
     cfg.define_knob('tensorize', [1])
-    cfg.define_knob('VK,VP', [(6, 16)])
+    cfg.define_knob('VK,VP', [(6, 16), (4, 24), (5, 16)])
     for intermediate in ["M", "A_T_dot_M", "input_tile", "B_T_dot_X", "V"]:
         cfg.define_knob("{}_COMPUTE_AT".format(intermediate), [1])
     for intermediate in ["input_tile", "V"]: # , "B_T_dot_X",
         cfg.define_knob("{}_REORDER_C".format(intermediate), [0, 1])
 
+    cfg.define_knob(['input_tile_cache_reorder'])
     # cfg.define_knob('data_pad_inline', [0, 1])
 
     VK, VP = cfg['VK,VP'].val
@@ -326,7 +327,7 @@ def conv2d_winograd_autotvm(s, ic, oc):
     s = simple_winograd.schedule_winograd(cfg, output, VK=VK, VP=VP)
     if cfg.flop == 0:
         cfg.add_flop(2 * ic * oc * s * s * 3 * 3)
-    print(tvm.lower(s, [X, W, output], simple_mode=True))
+    # print(tvm.lower(s, [X, W, output], simple_mode=True))
     return s, [X, W, output]
 
 
@@ -378,7 +379,7 @@ for i, w in enumerate(WORKLOADS):
     measure_option = autotvm.measure_option(
         measure_func='local' if not simple_winograd.USE_RASP else autotvm.use_rpc("rpi", host="localhost", port=9190),
         n_parallel=1,
-        number=10)
+        number=5)
 
     task = autotvm.task.create(
         conv2d_winograd_autotvm,

@@ -86,6 +86,30 @@ class Pool(OnnxOpConverter):
             extras={'ceil_mode': False},
             custom_check=_dimension_constraint())(inputs, attr, params)
 
+class Int8ConvRelu(OnnxOpConverter):
+    """ A helper class for pool op converters.
+    """
+
+    name = ''
+
+    @classmethod
+    def _impl_v1(cls, inputs, attr, params):
+        # inputs are (Tensor<int8> data, float scale, int32 offset, float output_scale, int32_t output_offset)
+        # Conv(Tensor<int8> X, Tensor<int8> W) -> Tensor<int32> Y
+        # Requantize(Tensor<Int32> Y, input_offset, input_scale, output_offset, output_scale) -> Tensor<int8> Y_quantized
+
+        return AttrCvt(
+            op_name=_dimension_picker(cls.name),
+            transforms={
+                'kernel_shape': 'pool_size',
+                'pads': ('padding', (0, 0), _revert_caffe2_pad)
+            },
+            # very weird attributes here in onnx, force check
+            ignores=['dilations'],
+            # TODO(zhreshold): make sure ceil_mode in onnx, and layout?
+            extras={'ceil_mode': False},
+            custom_check=_dimension_constraint())(inputs, attr, params)
+
 
 class Absolute(OnnxOpConverter):
 

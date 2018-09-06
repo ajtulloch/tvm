@@ -44,7 +44,7 @@ image = image.transpose((2, 0, 1))
 x = image[np.newaxis, :]
 print(x.shape)
 
-init_net, predict_net = load_caffe2_model('seg_init_net_20180122.pb', 'seg_predict_net_20180122.pb')
+init_net, predict_net = load_caffe2_model('seg_init_net_a.pb', 'seg_predict_net_a.pb')
 sym, params = from_caffe2(init_net, predict_net)
 print(sym.debug_str())
 
@@ -52,7 +52,7 @@ print(sym.debug_str())
 input_name = sym.list_input_names()[0]
 shape_dict = {input_name: x.shape}
 
-opt_level = 2
+opt_level = 3
 target = 'llvm -mcpu=core-avx2'
 graph = None
 lib = None

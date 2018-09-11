@@ -7,7 +7,7 @@ import nnvm
 opt_level = 3
 target = 'llvm -mcpu=core-avx2'
 
-sym = unet.unet_symbol()
+sym = unet.unet()
 mod = mx.mod.Module(symbol=sym, context=mx.cpu())
 mod.bind(for_training     = False,
          inputs_need_grad = False,

@@ -59,6 +59,7 @@ class TaskExtractEnv:
         # nnvm symbol -> topi compute
         self.symbol2topi = {
             nnvm.sym.conv2d: [topi.nn.conv2d, topi.nn.depthwise_conv2d_nchw],
+            nnvm.sym.contrib.conv2d_NCHWc: [topi.nn.conv2d_NCHWc],
             nnvm.sym.conv2d_transpose: [topi.nn.conv2d_transpose_nchw],
             nnvm.sym.dense: [topi.nn.dense],
         }
@@ -66,6 +67,7 @@ class TaskExtractEnv:
         # topi compute -> autotvm task name
         self.topi_to_task = {
             topi.nn.conv2d: "topi_nn_conv2d",
+            topi.nn.conv2d_NCHWc: "topi_nn_conv2d_NCHWc",
             topi.nn.depthwise_conv2d_nchw: "topi_nn_depthwise_conv2d_nchw",
             topi.nn.conv2d_transpose_nchw: "topi_nn_conv2d_transpose_nchw",
             topi.nn.dense: "topi_nn_dense",
@@ -74,6 +76,7 @@ class TaskExtractEnv:
         self.topi_to_schedule = {
             topi.nn.conv2d: [topi.generic.schedule_conv2d_nchw,
                              topi.generic.schedule_conv2d_nhwc],
+            topi.nn.conv2d_NCHWc: [topi.generic.schedule_conv2d_NCHWc_],
             topi.nn.depthwise_conv2d_nchw: [topi.generic.schedule_depthwise_conv2d_nchw,
                                             topi.generic.schedule_depthwise_conv2d_nhwc],
             topi.nn.conv2d_transpose_nchw: [topi.generic.schedule_conv2d_transpose_nchw],
@@ -113,7 +116,7 @@ class TaskExtractEnv:
                     """start a scope to hold the local function in for loop"""
 
                     @schedule_func.register("tracing", )
-                    def _tracing_topi_compute(outs):
+                    def _tracing_topi_schedule(outs):
                         outs = [outs] if isinstance(outs, tensor.Tensor) else outs
                         return create_schedule([x.op for x in outs])
                 _local_scope_(topi_schedule)
@@ -134,6 +137,18 @@ class TaskExtractEnv:
             s = topi.generic.schedule_conv2d_nchw([C])
             return s, [A, W, C]
 
+        # Tuning wrapper for topi functions
+        @register("topi_nn_conv2d_NCHWc")
+        def _topi_nn_conv2d_NCHWc(*args, **kwargs):
+            assert not kwargs, "Do not support kwargs in template function call"
+            args = deserialize_args(args)
+            A, W = args[:2]
+            layout = args[-2]
+            assert layout == 'NCHW8c', layout
+            C = topi.nn.conv2d_NCHWc(*args, **kwargs)
+            s = topi.generic.schedule_conv2d_NCHWc_([C])
+            return s, [A, W, C]
+
         @register("topi_nn_depthwise_conv2d_nchw")
         def _topi_nn_depthwise_conv2d_nchw(*args, **kwargs):
             assert not kwargs, "Do not support kwargs in template function call"
@@ -151,6 +166,7 @@ class TaskExtractEnv:
             C = topi.nn.conv2d_transpose_nchw(*args, **kwargs)
             s = topi.generic.schedule_conv2d_transpose_nchw([C])
             return s, [A, W, C]
+
 
         @register("topi_nn_dense")
         def _topi_nn_dense(*args, **kwargs):

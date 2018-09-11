@@ -80,3 +80,44 @@ def schedule_pool(outs, layout):
     s[output_op].vectorize(list(output_op.axis)[-1])
     s[output_op].fuse(output_op.axis[0], output_op.axis[1])
     return s
+
+def _default_declaration_conv_NCHWc(data, kernel, num_filter, kernel_size, stride,
+                                    padding, layout, out_layout, out_dtype='float32'):
+    HPAD, WPAD, _, _ = topi.nn.get_pad_tuple(padding, kernel)
+    if isinstance(stride, (tuple, list)):
+        HSTR, WSTR = stride
+    else:
+        HSTR, WSTR = stride, stride
+
+    batch_size = data.shape[0]
+    _, CII, IH, IW, CIII = [x.value for x in data.shape]
+    COO, CII, KH, KW, CIII_, COOO = [x.value for x in kernel.shape]
+    assert CIII == CIII_
+    out_height = (IH + 2 * HPAD - KH) // HSTR + 1
+
+    out_width = (IW + 2 * WPAD - KW) // WSTR + 1
+
+    # pack data
+    DOPAD = (HPAD != 0 or WPAD != 0)
+    if DOPAD:
+        data_pad = topi.nn.pad(data, (0, 0, HPAD, WPAD, 0), name="data_pad")
+    else:
+        data_pad = data
+
+    # convolution
+    oshape = (batch_size, COO, out_height, out_width, COOO)
+
+    ic = tvm.reduce_axis((0, CII * CIII), name='ic')
+    ciii = tvm.reduce_axis((0, CIII), name='ciii')
+    kh = tvm.reduce_axis((0, KH), name='kh')
+    kw = tvm.reduce_axis((0, KW), name='kw')
+
+    conv = tvm.compute(oshape, lambda n, oc_chunk, oh, ow, oc_block:
+                       tvm.sum(data_pad[n, ic // CIII, oh*HSTR+kh, ow*WSTR+kw, ic % CIII]
+                               .astype(out_dtype) *
+                               kernel[oc_chunk, ic // CIII, kh, kw, ic % CIII, oc_block],
+                               axis=[ic, kh, kw]), name='conv2d_NCHWc', tag="conv2d_NCHWc")
+
+    return conv
+
+topi.nn.conv2d_NCHWc.fdefault = _default_declaration_conv_NCHWc

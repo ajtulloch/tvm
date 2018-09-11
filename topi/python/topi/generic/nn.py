@@ -55,6 +55,10 @@ def schedule_conv2d_nhwc(outs):
 
 
 @tvm.target.generic_func
+def schedule_conv2d_NCHWc_(outs):
+    return _default_schedule(outs, False)
+
+@tvm.target.generic_func
 def schedule_conv2d_NCHWc(num_filter, kernel_size, strides,
                           padding, layout, out_layout, outs):
     """Schedule for conv2d_NCHW[x]c

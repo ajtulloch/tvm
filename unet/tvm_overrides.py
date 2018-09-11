@@ -2,6 +2,7 @@ import tvm
 import topi.nn.util
 from topi.nn.conv2d import conv2d_alter_layout, _get_workload
 import nnvm.top.registry
+from topi import generic, tag
 
 @conv2d_alter_layout.register("cpu", override=True)
 def _alter_conv2d_layout(attrs, inputs, tinfos):
@@ -41,3 +42,41 @@ def alter_max_pool2d_layout(attrs, inputs, tinfos):
     if CI % 8 == 0:
         new_attrs['layout'] = 'NCHW8c'
         return sym.max_pool2d(*copy_inputs, **new_attrs)
+
+@generic.schedule_pool.register(["cpu"], override=True)
+def schedule_pool(outs, layout):
+    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    s = tvm.create_schedule([x.op for x in outs])
+    scheduled_ops = []
+    output_op = outs[0].op
+
+    def traverse(op):
+        # inline all one-to-one-mapping operators except the last stage (output)
+        if tag.is_broadcast(op.tag):
+            if op not in s.outputs:
+                s[op].compute_inline()
+            for tensor in op.input_tensors:
+                if tensor.op.input_tensors and tensor.op not in scheduled_ops:
+                    traverse(tensor.op)
+
+        elif op.tag.startswith('pool'):
+            # schedule the pooling op.
+            kw, kh = op.reduce_axis
+            s[op].unroll(kw)
+            s[op].unroll(kh)
+            s[op].vectorize(list(op.axis)[-1])
+            s[op].compute_at(s[outs[0].op], list(outs[0].op.axis)[-2])
+
+            for tensor in op.input_tensors:
+                if tensor.op.input_tensors and tensor.op not in scheduled_ops:
+                    traverse(tensor.op)
+
+        else:
+            raise RuntimeError("Unsupported operator: %s" % op.tag)
+
+        scheduled_ops.append(op)
+
+    traverse(output_op)
+    s[output_op].vectorize(list(output_op.axis)[-1])
+    s[output_op].fuse(output_op.axis[0], output_op.axis[1])
+    return s

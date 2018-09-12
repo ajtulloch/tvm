@@ -158,7 +158,7 @@ def run(align_8, num_iter, num_cycles, opt_level):
         print(task)
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
-                   builder=autotvm.LocalBuilder(),
+                   builder=autotvm.LocalBuilder(n_parallel=1),
                    runner=autotvm.LocalRunner(
                        number=1,
                        timeout=5)

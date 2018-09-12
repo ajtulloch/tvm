@@ -31,13 +31,13 @@ def run(align_8, num_iter, num_cycles, opt_level):
     # ipdb.set_trace()
     sym, params = nnvm.frontend.from_mxnet(sym, arg_params=mod.get_params()[0], aux_params=mod.get_params()[1])
     assert params
-    print(sym, params)
 
     data_shape = (1, 3, 192, 192)
     out_shape = (1, 1, 192, 192)
     with nnvm.compiler.build_config(opt_level=opt_level):
         graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
     module = runtime.create(graph, lib, ctx)
+    logging.debug(graph.symbol().debug_str())
     module.set_input('data', tvm.nd.array(np.random.uniform(size=(data_shape)).astype("float32")))
     rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
     module.set_input(**params)

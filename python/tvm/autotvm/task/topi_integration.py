@@ -112,7 +112,7 @@ def register_topi_compute(topi_compute, target_keys, template_keys, func=None):
     return _decorator
 
 
-def register_topi_schedule(topi_schedule, target_keys, template_keys, func=None):
+def register_topi_schedule(topi_schedule, target_keys, template_keys, func=None, override=False):
     """Register a tunable template for a topi schedule function.
 
     After the registration. This topi schedule will become a configuration dispatcher. It dispatches
@@ -151,7 +151,7 @@ def register_topi_schedule(topi_schedule, target_keys, template_keys, func=None)
             if target_key not in _REGISTED_DISPATHCER:
                 _REGISTED_DISPATHCER[target_key] = {}
             if topi_schedule not in _REGISTED_DISPATHCER[target_key]:
-                @topi_schedule.register(target_key)
+                @topi_schedule.register(target_key, override=override)
                 @dispatcher
                 def config_dispatcher(outs):
                     """override topi call as a workload dispatcher"""

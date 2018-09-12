@@ -10,6 +10,7 @@ import os
 import time
 import tvm
 import tvm_overrides
+import unet_conv2d
 import unet
 import topi
 
@@ -155,35 +156,37 @@ def run(align_8, num_iter, num_cycles, opt_level):
 
     tasks = autotvm.task.extract_from_graph(sym, target=target,
                                             shape=dict(data=data_shape), dtype="float32",
-                                            symbols=(nnvm.sym.contrib.conv2d_NCHWc,
-                                                     nnvm.sym.conv2d,
-                                                     nnvm.sym.max_pool2d))
+                                            symbols=(nnvm.sym.contrib.conv2d_NCHWc,))
     print(tasks)
+    for task in tasks:
+        print(task)
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
                    builder=autotvm.LocalBuilder(),
                    runner=autotvm.LocalRunner(
-                       number=10,
+                       number=1,
                        timeout=5)
                ),
                log_filename="tuning.log")
-    with autotvm.apply_history_best("tuning.log"):
-        with nnvm.compiler.build_config(opt_level=opt_level):
-            graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
 
-    module = tvm.contrib.graph_runtime.create(graph, lib, ctx)
-    module.set_input('data', tvm.nd.array(np.random.uniform(size=(data_shape)).astype("float32")))
-    rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
-    module.set_input(**params)
-    module.run()
-    out = module.get_output(0, tvm.nd.empty(out_shape, ctx=ctx))
-    out.asnumpy()
 
-    ftimer = module.module.time_evaluator("run", ctx, num_iter)
-    for i in range(num_cycles):
-        prof_res = ftimer()
-        print("TVM time: ", prof_res.mean)
-        time.sleep(1)
+    # with autotvm.apply_history_best("tuning.log"):
+    #     with nnvm.compiler.build_config(opt_level=opt_level):
+    #         graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
+
+    # module = tvm.contrib.graph_runtime.create(graph, lib, ctx)
+    # module.set_input('data', tvm.nd.array(np.random.uniform(size=(data_shape)).astype("float32")))
+    # rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
+    # module.set_input(**params)
+    # module.run()
+    # out = module.get_output(0, tvm.nd.empty(out_shape, ctx=ctx))
+    # out.asnumpy()
+
+    # ftimer = module.module.time_evaluator("run", ctx, num_iter)
+    # for i in range(num_cycles):
+    #     prof_res = ftimer()
+    #     print("TVM time: ", prof_res.mean)
+    #     time.sleep(1)
 
 if __name__ == '__main__':
     run()

@@ -81,7 +81,7 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
             cfg, A_NCHW, W_NCHW, stride, padding,
             layout="NCHW", out_dtype="float32", VP=4, VK=4, packed_output=False)
         B_NCHWc_wino = unet_winograd_NCHWc.decl_winograd_NCHWc(
-            cfg, A_NCHWc, W_NCHWc, stride, padding, out_dtype="float32", VP=4)
+            cfg, A_NCHWc, W_NCHWc, stride, padding, out_dtype="float32", VP=4, VK=4)
         s = topi.generic.schedule_conv2d_nhwc([B])
         s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
         s_nchw_wino = unet_winograd.schedule_winograd(cfg, B_NCHW_wino, VP=4, VK=4)

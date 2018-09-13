@@ -1,12 +1,15 @@
 from __future__ import division
 
+from topi.nn.util import get_pad_tuple
+from tvm import autotvm
+
+import numpy as np
 import topi
 import topi.nn.util
 import tvm
-import numpy as np
-from topi.nn.util import get_pad_tuple
+import unet_intrinsics
 
-def decl_winograd_NCHWc(cfg, data, kernel, strides, padding, VP, out_dtype):
+def decl_winograd_NCHWc(cfg, data, kernel, strides, padding, VK, VP, out_dtype):
     # Assumption: NCHW8c input, NCHW8c output.
 
     # return _baseline_winograd(cfg, data, kernel, strides, padding, layout, out_dtype)
@@ -45,7 +48,7 @@ def decl_winograd_NCHWc(cfg, data, kernel, strides, padding, VP, out_dtype):
 
     def round_up(a, b): return ((a + b - 1) // b) * b
 
-    VK = COOO
+    # VK = COOO
     CO = COO * COOO
     C = CII * CIII
     K = round_up(CO, VK)
@@ -57,7 +60,6 @@ def decl_winograd_NCHWc(cfg, data, kernel, strides, padding, VP, out_dtype):
     r_kh = tvm.reduce_axis((0, KH), 'r_kh')
     r_kw = tvm.reduce_axis((0, KW), 'r_kw')
     assert K >= CO
-    print(K, CO)
     if K > CO:
         kernel_pad = topi.nn.pad(kernel, (0, 0, 0, 0, 0, 0), (K - CO, 0, 0, 0, 0, 0), name="kernel_pad")
     else:
@@ -202,7 +204,10 @@ def decl_winograd_NCHWc(cfg, data, kernel, strides, padding, VP, out_dtype):
             temp_expr[(3, j)] = s3
             temp_expr[(4, j)] = s4
             temp_expr[(5, j)] = s5
-        now = tvm.const(0.0, "float32")
+
+        (d0, d1, d2, d3, d4, d5) = topi.util.get_const_tuple(M.shape)
+
+        now = tvm.const(0.0, "float32") #* M[d0 - 1, d1 - 1, d2 - 1, d3 - 1, d4 - 1, d5 - 1]
         for ii in range(m):
             for jj in range(alpha):
                 now = tvm.select(tvm.all(eps == ii, nu == jj),
@@ -269,3 +274,118 @@ def decl_winograd_NCHWc(cfg, data, kernel, strides, padding, VP, out_dtype):
         cfg.add_flop(2 * N * K * H * W * KH * KW * C)
 
     return output
+
+def schedule_winograd_NCHWc(cfg, output, VK, VP):
+    s = tvm.create_schedule(output.op)
+    if not cfg:
+        return s
+    Y = output.op.input_tensors[0]
+    A_T_dot_M = Y.op.input_tensors[0]
+    M = A_T_dot_M.op.input_tensors[0]
+    U, V = M.op.input_tensors
+    B_T_dot_X = V.op.input_tensors[0]
+    input_tile = B_T_dot_X.op.input_tensors[0]
+    data_pad = input_tile.op.input_tensors[0]
+    # padding
+
+    UNROLL = cfg['unroll'].val
+    VECTORIZE = cfg['vectorize'].val
+    TENSORIZE = cfg['tensorize'].val
+    if cfg['data_pad_VECTORIZE'].val:
+        s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
+
+    if cfg['data_pad_inline'].val:
+        s[data_pad].compute_inline()
+
+    (b, c, eps, nu, bb) = s[input_tile].op.axis
+    if cfg['input_tile_VECTORIZE'].val:
+        s[input_tile].vectorize(bb)
+
+    if cfg['input_tile_REORDER_C'].val:
+        s[input_tile].reorder(b, eps, nu, c, bb)
+
+    # transform kernel
+    if isinstance(U.op, tvm.tensor.ComputeOp):
+        kernel, G = U.op.input_tensors
+        if isinstance(kernel.op, tvm.tensor.ComputeOp):
+            s[kernel].compute_inline()
+
+        s[G].compute_inline()
+        k, eps, nu, c, kk, = s[U].op.axis
+        # r_kh, r_kw = s[U].op.reduce_axis
+        # s[U].reorder(k, c, eps, nu, r_kh, r_kw, kk)
+        # s[U].unroll(eps)
+        # s[U].unroll(nu)
+        # s[U].unroll(r_kh)
+        # s[U].unroll(r_kw)
+        # s[U].vectorize(kk)
+        if autotvm.GLOBAL_SCOPE.in_tuning:
+            # kernel transformation will be pre-computed during compilation, so we skip
+            # this part to make tuning records correct
+            s[U].pragma(s[U].op.axis[0], 'debug_skip_region')
+            s[G].pragma(s[G].op.axis[0], 'debug_skip_region')
+
+    # if autotvm.GLOBAL_SCOPE.in_tuning:
+    #     s[output].pragma(s[output].op.axis[0], 'debug_skip_region')
+
+    (k, b, eps, nu, kk, bb) = A_T_dot_M.op.axis
+    s[A_T_dot_M].reorder(b, k, eps, nu, kk, bb)
+    if UNROLL:
+        [s[A_T_dot_M].unroll(ax) for ax in [eps, nu, kk]]
+    if VECTORIZE:
+        s[A_T_dot_M].vectorize(bb)
+
+    if cfg['M_COMPUTE_AT'].val:
+        s[M].compute_at(s[A_T_dot_M], b)
+
+    (k, b, eps, nu, kk, bb) = Y.op.axis
+    s[Y].reorder(b, k, eps, nu, kk, bb)
+    if UNROLL:
+        [s[Y].unroll(ax) for ax in [eps, nu, kk]]
+
+    if VECTORIZE:
+        s[Y].vectorize(bb)
+
+    if cfg['A_T_dot_M_COMPUTE_AT'].val:
+        s[A_T_dot_M].compute_at(s[Y], b)
+
+    # Schedule V
+    (b, c, eps, nu, bb) = B_T_dot_X.op.axis
+    if UNROLL:
+        [s[B_T_dot_X].unroll(ax) for ax in [eps, nu]]
+    if VECTORIZE:
+        s[B_T_dot_X].vectorize(bb)
+
+    if cfg['B_T_dot_X_REORDER_C'].val:
+        s[B_T_dot_X].reorder(b, eps, nu, c, bb)
+
+    if cfg['input_tile_COMPUTE_AT'].val:
+        s[input_tile].compute_at(s[B_T_dot_X], b)
+
+    (b, eps, nu, c, bb) = V.op.axis
+    if UNROLL:
+        [s[V].unroll(ax) for ax in [eps, nu]]
+    if VECTORIZE:
+        s[V].vectorize(bb)
+    if cfg['V_REORDER_C'].val:
+        s[V].reorder(b, eps, nu, c, bb)
+
+    if cfg['B_T_dot_X_COMPUTE_AT'].val:
+        s[B_T_dot_X].compute_at(s[V], b)
+
+    (k, b, eps, nu, kk, bb) = M.op.axis
+    if cfg['V_COMPUTE_AT'].val:
+        s[V].compute_at(s[M], b)
+    s[M].reorder(b, k, eps, nu, kk, bb)
+    K = topi.util.get_const_int(M.op.reduce_axis[0].dom.extent)
+    (tensorize_gemm, tensorize_code_path) = unet_intrinsics.gemm(M=VK, N=VP, K=K)
+
+    s[M].tensorize(kk, tensorize_gemm)
+    s[M].pragma(s[M].op.axis[0], "import_llvm", tensorize_code_path)
+
+    (n, co, h, w, coo) = s[output].op.axis
+    if cfg['output_VECTORIZE'].val:
+        s[output].vectorize(coo)
+    if cfg['Y_COMPUTE_AT'].val:
+        s[Y].compute_at(s[output], co)
+    return s

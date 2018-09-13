@@ -184,7 +184,7 @@ class RPCRunner(Runner):
         self.check_correctness = check_correctness
         self.cooldown_interval = cooldown_interval
 
-        self.executor = LocalExecutor()
+        self.executor = LocalExecutor(timeout=timeout)
 
     def set_task(self, task):
         self.task = task

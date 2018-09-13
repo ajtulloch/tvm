@@ -74,10 +74,10 @@ def run():
     logging.basicConfig(level=logging.DEBUG)
     for i, w in enumerate(WORKLOADS):
         measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(n_parallel=1),
+            builder=autotvm.LocalBuilder(n_parallel=1, timeout=500),
             runner=autotvm.LocalRunner(
-                number=3,
-                repeat=10,
+                number=50,
+                repeat=2,
                 timeout=500)
         )
 

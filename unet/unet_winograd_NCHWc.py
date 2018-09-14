@@ -291,14 +291,15 @@ def schedule_winograd_NCHWc(cfg, output, VK, VP):
     UNROLL = cfg['unroll'].val
     VECTORIZE = cfg['vectorize'].val
     TENSORIZE = cfg['tensorize'].val
-    if cfg['data_pad_VECTORIZE'].val:
+
+    if VECTORIZE:
         s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
 
-    if cfg['data_pad_inline'].val:
-        s[data_pad].compute_inline()
+    # if cfg['data_pad_inline'].val:
+    #     s[data_pad].compute_inline()
 
     (b, c, eps, nu, bb) = s[input_tile].op.axis
-    if cfg['input_tile_VECTORIZE'].val:
+    if VECTORIZE:
         s[input_tile].vectorize(bb)
 
     if cfg['input_tile_REORDER_C'].val:
@@ -384,8 +385,8 @@ def schedule_winograd_NCHWc(cfg, output, VK, VP):
     s[M].pragma(s[M].op.axis[0], "import_llvm", tensorize_code_path)
 
     (n, co, h, w, coo) = s[output].op.axis
-    if cfg['output_VECTORIZE'].val:
-        s[output].vectorize(coo)
-    if cfg['Y_COMPUTE_AT'].val:
-        s[Y].compute_at(s[output], co)
+    # if cfg['output_VECTORIZE'].val:
+    #     s[output].vectorize(coo)
+    # if cfg['Y_COMPUTE_AT'].val:
+    #     s[Y].compute_at(s[output], co)
     return s

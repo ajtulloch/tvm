@@ -22,11 +22,17 @@ def _alter_conv2d_layout(attrs, inputs, tinfos):
 
     wkl = _get_workload(data, kernel, stride, padding, data.dtype)
     print(wkl)
-    if wkl.in_filter % 8 == 0 and wkl.out_filter % 8 == 0:
-        new_attrs['layout'] = 'NCHW8c'
-        new_attrs['out_layout'] = 'NCHW8c'
-        new_attrs['kernel_layout'] = 'OIHW8i8o'
+    if wkl.in_filter % 16 == 0 and wkl.out_filter % 16 == 0:
+        print("Altering layout to NCHW16c")
+        new_attrs['layout'] = 'NCHW16c'
+        new_attrs['out_layout'] = 'NCHW16c'
+        new_attrs['kernel_layout'] = 'OIHW16i16o'
         return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+    # if wkl.in_filter % 8 == 0 and wkl.out_filter % 8 == 0:
+    #     new_attrs['layout'] = 'NCHW8c'
+    #     new_attrs['out_layout'] = 'NCHW8c'
+    #     new_attrs['kernel_layout'] = 'OIHW8i8o'
+    #     return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
 
 # # data = sym.max_pool2d(data=data, pool_size=(2, 2), strides=(2, 2), layout=layout)
 @nnvm.top.registry.register_alter_op_layout("max_pool2d")
@@ -39,9 +45,12 @@ def alter_max_pool2d_layout(attrs, inputs, tinfos):
 
     data = tinfos[0]
     _, CI, _, _ = [x.value for x in data.shape]
-    if CI % 8 == 0:
-        new_attrs['layout'] = 'NCHW8c'
+    if CI % 16 == 0:
+        new_attrs['layout'] = 'NCHW16c'
         return sym.max_pool2d(*copy_inputs, **new_attrs)
+    # if CI % 8 == 0:
+    #     new_attrs['layout'] = 'NCHW8c'
+    #     return sym.max_pool2d(*copy_inputs, **new_attrs)
 
 @generic.schedule_pool.register(["cpu"], override=True)
 def schedule_pool(outs, layout):
@@ -117,7 +126,8 @@ def _default_declaration_conv_NCHWc(data, kernel, num_filter, kernel_size, strid
                                .astype(out_dtype) *
                                kernel[oc_chunk, ic // CIII, kh, kw, ic % CIII, oc_block],
                                axis=[ic, kh, kw]), name='conv2d_NCHWc', tag="conv2d_NCHWc")
-
+    import ipdb
+    ipdb.set_trace()
     return conv
 
 topi.nn.conv2d_NCHWc.fdefault = _default_declaration_conv_NCHWc

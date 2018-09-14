@@ -12,10 +12,11 @@ import tvm
 import tvm_overrides
 import unet_conv2d
 import unet
-import topi
 
-target = 'llvm -mcpu=core-avx2'
+target = 'llvm -mcpu=core-avx2 -target=x86_64-linux-gnu'
+# target = 'llvm -mcpu=core-avx2'
 ctx = tvm.context(str(target), 0)
+
 
 def build_until_compile(graph, target=None, shape=None, dtype="float32",
                         params=None, target_host=None, layout=None):
@@ -63,7 +64,7 @@ def build_until_compile(graph, target=None, shape=None, dtype="float32",
         # Initialize all variables specified in _all_var_init
         init_var = {}
         if _all_var_init:
-            init_var = initialize_variables(shape, dtype)
+            initialize_variables(shape, dtype)
         # Apply optimization
         with target:
             graph = optimize(graph, shape, dtype, layout)
@@ -81,21 +82,22 @@ def build_until_compile(graph, target=None, shape=None, dtype="float32",
 def tune_tasks(tasks,
                measure_option,
                tuner='xgb',
-               n_trial=1000,
-               early_stopping=400,
+               n_trial=2000,
+               early_stopping=100,
                log_filename='tuning.log',
-               use_transfer_learning=True):
+               use_transfer_learning=False):
     # create tmp log file
     tmp_log_file = log_filename + ".tmp"
     if os.path.exists(tmp_log_file):
         os.remove(tmp_log_file)
 
     for i, tsk in enumerate(reversed(tasks)):
+        print(tsk)
         prefix = "[Task %2d/%2d] " % (i+1, len(tasks))
 
         # create tuner
         if tuner == 'xgb' or tuner == 'xgb-rank':
-            tuner_obj = autotvm.tuner.XGBTuner(tsk, loss_type='rank')
+            tuner_obj = autotvm.tuner.XGBTuner(tsk, loss_type='rank', feature_type="knob")
         elif tuner == 'ga':
             tuner_obj = autotvm.tuner.GATuner(tsk, pop_size=50)
         elif tuner == 'random':
@@ -123,13 +125,26 @@ def tune_tasks(tasks,
 
 
 @click.command()
-@click.option('--align_8', default=0)
+@click.option('--align', default=8)
 @click.option('--num_iter', default=10)
 @click.option('--num_cycles', default=5)
+@click.option('--autotvm_number', default=50)
+@click.option('--autotvm_repeat', default=4)
+@click.option('--autotvm_n_trial', default=200)
+@click.option('--autotvm_early_stopping', default=100)
+@click.option('--autotvm_log', default="autotvm_unet_tuning.log", type=str)
 @click.option('--opt_level', default=3)
-def run(align_8, num_iter, num_cycles, opt_level):
+def run(align,
+        num_iter,
+        num_cycles,
+        autotvm_number,
+        autotvm_repeat,
+        autotvm_log,
+        autotvm_n_trial,
+        autotvm_early_stopping,
+        opt_level):
     logging.basicConfig(level=logging.DEBUG)
-    sym = unet.unet(align_8=align_8)
+    sym = unet.unet(alignment=align)
     mod = mx.mod.Module(symbol=sym, context=mx.cpu())
     mod.bind(data_shapes=[('data', (1, 3, 192, 192))])
     mod.init_params()
@@ -147,42 +162,24 @@ def run(align_8, num_iter, num_cycles, opt_level):
         target=target,
         shape=dict(data=data_shape),
         dtype="float32",
-        # symbols=(
         symbols=[
             nnvm.sym.conv2d,
-            # nnvm.sym.contrib.conv2d_NCHWc,
+            nnvm.sym.contrib.conv2d_NCHWc,
         ]
     )
-    print(tasks)
-    for task in tasks:
-        print(task)
+
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
-                   builder=autotvm.LocalBuilder(n_parallel=1),
-                   runner=autotvm.LocalRunner(
-                       number=1,
-                       timeout=5)
+                   builder=autotvm.LocalBuilder(timeout=500),
+                   runner=autotvm.RPCRunner(
+                       'skl', 'localhost', 9190,
+                       number=autotvm_number,
+                       repeat=autotvm_repeat,
+                       timeout=500)
                ),
-               log_filename="tuning.log")
-
-
-    # with autotvm.apply_history_best("tuning.log"):
-    #     with nnvm.compiler.build_config(opt_level=opt_level):
-    #         graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
-
-    # module = tvm.contrib.graph_runtime.create(graph, lib, ctx)
-    # module.set_input('data', tvm.nd.array(np.random.uniform(size=(data_shape)).astype("float32")))
-    # rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
-    # module.set_input(**params)
-    # module.run()
-    # out = module.get_output(0, tvm.nd.empty(out_shape, ctx=ctx))
-    # out.asnumpy()
-
-    # ftimer = module.module.time_evaluator("run", ctx, num_iter)
-    # for i in range(num_cycles):
-    #     prof_res = ftimer()
-    #     print("TVM time: ", prof_res.mean)
-    #     time.sleep(1)
+               n_trial=autotvm_n_trial,
+               early_stopping=autotvm_early_stopping,
+               log_filename=str(autotvm_log))
 
 if __name__ == '__main__':
     run()

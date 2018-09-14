@@ -144,7 +144,6 @@ class TaskExtractEnv:
             args = deserialize_args(args)
             A, W = args[:2]
             layout = args[-2]
-            assert layout == 'NCHW8c', layout
             C = topi.nn.conv2d_NCHWc(*args, **kwargs)
             s = topi.generic.schedule_conv2d_NCHWc_([C])
             return s, [A, W, C]

@@ -76,13 +76,12 @@ def decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, 
     else:
         HSTR, WSTR = stride, stride
 
-    batch_size = data.shape[0]
-    _, CII, IH, IW, CIII = [x.value for x in data.shape]
-    COO, CII, KH, KW, CIII_, COOO = [x.value for x in kernel.shape]
+    N, CII, IH, IW, CIII = topi.util.get_const_tuple(data.shape)
+    COO, CII_, KH, KW, CIII_, COOO = topi.util.get_const_tuple(kernel.shape)
     assert CIII == CIII_
-    out_height = (IH + 2 * HPAD - KH) // HSTR + 1
+    OH = (IH + 2 * HPAD - 3) // HSTR + 1
+    OW = (IW + 2 * WPAD - 3) // WSTR + 1
 
-    out_width = (IW + 2 * WPAD - KW) // WSTR + 1
 
     # pack data
     DOPAD = (HPAD != 0 or WPAD != 0)
@@ -91,21 +90,21 @@ def decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, 
     else:
         data_pad = data
 
-    # convolution
-    oshape = (batch_size, COO, out_height, out_width, COOO)
+    cfg.define_split('tile_ow', cfg.axis(OW), num_outputs=2, filter=lambda x: x.size[-1] <= 6)
 
-    ic = tvm.reduce_axis((0, CII * CIII), name='ic')
+    # convolution
+    oshape = (N, COO, OH, OW, COOO)
+
+    cii = tvm.reduce_axis((0, CII), name='cii')
     ciii = tvm.reduce_axis((0, CIII), name='ciii')
     kh = tvm.reduce_axis((0, KH), name='kh')
     kw = tvm.reduce_axis((0, KW), name='kw')
 
     conv = tvm.compute(oshape, lambda n, oc_chunk, oh, ow, oc_block:
-                       tvm.sum(data_pad[n, ic // CIII, oh*HSTR+kh, ow*WSTR+kw, ic % CIII]
+                       tvm.sum(data_pad[n, cii, oh*HSTR+kh, ow*WSTR+kw, ciii]
                                .astype(out_dtype) *
-                               kernel[oc_chunk, ic // CIII, kh, kw, ic % CIII, oc_block],
-                               axis=[ic, kh, kw]),
-                       name='conv2d_NCHWc',
-                       tag="conv2d_NCHWc",
+                               kernel[oc_chunk, cii, kh, kw, ciii, oc_block],
+                               axis=[cii, ciii, kh, kw]), name='conv2d_NCHWc', tag="conv2d_NCHWc",
                        attrs={'workload': wkl})
 
     return conv
@@ -120,10 +119,8 @@ def schedule_conv2d_NCHWc_cpu(cfg, outs):
         if 'conv2d_NCHWc' in op.tag:
             output = op.output(0)
             data_pad = op.input_tensors[0]
-            data = data_pad.op.input_tensors[0]
-            s[data_pad].compute_inline()
             kernel = op.input_tensors[1]
-            _schedule_spatial_pack_NCHWc(cfg, s, data, kernel, output, outs[0])
+            _schedule_spatial_pack_NCHWc(cfg, s, output, outs[0])
 
     traverse_inline(s, outs[0].op, _callback)
     return s
@@ -136,6 +133,7 @@ def schedule_conv2d_nchw_cpu(cfg, outs):
 
     def _callback(op):
         # schedule conv2d
+
         if 'spatial_conv2d_output' in op.tag:
             output = op.output(0)
             conv = op.input_tensors[0]
@@ -286,10 +284,10 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
     s[conv].compute_at(s[last], ow)
 
     # mark parallel
-    s[last].parallel(co)
+    # s[last].parallel(co)
 
     _, h, _, _, _, _ = s[data_vec].op.axis
-    s[data_vec].parallel(h)
+    # s[data_vec].parallel(h)
 
     if kernel_vec.op.name == 'kernel_vec':
         co, _, _, _, _ = s[kernel_vec].op.axis
@@ -298,19 +296,77 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
             # this part to make tuning records correct
             s[kernel_vec].pragma(co, 'debug_skip_region')
         else:
-            s[kernel_vec].parallel(co)
-    elif kernel_vec.op.name == 'kernel_vec_conv2d_transpose':  # for conv2d transpose
-        co, _, _, _, _ = s[kernel_vec].op.axis
-        s[kernel_vec].parallel(co)
-
+            pass
+            # s[kernel_vec].parallel(co)
     return s
 
-def _schedule_spatial_pack_NCHWc(cfg, s, data, kernel, output, last):
+def _schedule_spatial_pack_NCHWc(cfg, s, conv, last):
     """schedule implementation"""
-    n, coo, h, w, cooo = s[output].op.axis
-    ci, kh, kw = s[output].op.reduce_axis
-    cii, ciii = s[output].split(ci, 8)
+    data_pad = conv.op.input_tensors[0]
+    assert data_pad.op.name == "data_pad"
+    kernel = conv.op.input_tensors[0]
 
-    cfg.define_annotate("ann_reduce", [kh, kw], policy='try_unroll')
-    cfg.define_annotate("ann_spatial", [cooo], policy='try_unroll_vec')
+    # schedule 5-D NCHW[x]c conv
+    C, O = conv, conv
+    CC = s.cache_write(C, 'global')
+
+    cfg.define_knob('data_pad_inline', [0, 1])
+    if cfg['data_pad_inline'].val:
+        s[data_pad].compute_inline()
+
+    _, oc_chunk, oh, ow, oc_block = s[C].op.axis
+    ow_chunk, ow_block = cfg['tile_ow'].apply(s, C, ow)
+
+    s[C].reorder(oc_chunk, oh, ow_chunk, ow_block, oc_block)
+    s[C].vectorize(oc_block)
+    s[CC].compute_at(s[C], ow_chunk)
+    _, oc_chunk, oh, ow, oc_block = s[CC].op.axis
+    cii, ciii, kh, kw = s[CC].op.reduce_axis
+
+    ow_chunk, ow_block = cfg['tile_ow'].apply(s, CC, ow)
+
+    (oc_chunk_ax, oh_ax, ow_chunk_ax, cii_ax, kh_ax, ciii_ax, kw_ax, ow_block_ax, oc_block_ax) = [
+        cfg.axis(oc_chunk), cfg.axis(oh), cfg.axis(ow_chunk), cfg.axis(cii), cfg.axis(kh), cfg.axis(ciii), cfg.axis(kw), cfg.axis(ow_block), cfg.axis(oc_block)]
+
+    cfg.define_reorder(
+        "reorder_0",
+        [oc_chunk_ax, oh_ax, ow_chunk_ax, cii_ax, kh_ax, ciii_ax, kw_ax, ow_block_ax, oc_block_ax],
+        policy='candidate',
+        candidate=[
+            [oc_chunk_ax, oh_ax, ow_chunk_ax, cii_ax, kh_ax, kw_ax, ciii_ax, ow_block_ax, oc_block_ax],
+            [oc_chunk_ax, oh_ax, ow_chunk_ax, cii_ax, kh_ax, ciii_ax, kw_ax, ow_block_ax, oc_block_ax],
+            [oc_chunk_ax, oh_ax, ow_chunk_ax, cii_ax, ciii_ax, kh_ax, kw_ax, ow_block_ax, oc_block_ax],
+            [oc_chunk_ax, oh_ax, ow_chunk_ax, cii_ax, kh_ax, kw_ax, ow_block_ax, ciii_ax, oc_block_ax],
+        ]
+    )
+
+    cfg["reorder_0"].apply(
+        s,
+        CC,
+        [oc_chunk, oh, ow_chunk, cii, kh, ciii, kw, ow_block, oc_block]
+    )
+
+    cfg.define_annotate('ann_reduce_k', [kw, kh], policy='try_unroll')
+    cfg["ann_reduce_k"].apply(
+        s,
+        CC,
+        [kh, kw],
+        axis_lens=[
+            topi.util.get_const_int(kh.dom.extent),
+            topi.util.get_const_int(kw.dom.extent),
+        ],
+        cfg=cfg
+    )
+    cfg.define_annotate('ann_reduce_ow', [ow_block], policy='try_unroll')
+    cfg["ann_reduce_ow"].apply(
+        s,
+        CC,
+        [ow_block],
+        axis_lens=[
+            cfg['tile_ow'].size[-1]
+        ],
+        cfg=cfg
+    )
+
+    s[CC].vectorize(oc_block)
     return s

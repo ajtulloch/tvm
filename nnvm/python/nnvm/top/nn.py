@@ -173,7 +173,9 @@ def compute_contrib_conv2d_NCHWc(attrs, inputs, _):
     layout = attrs.get_string("layout")
     out_layout = attrs.get_string("out_layout")
     assert dilation == (1, 1), "not support dilate now"
+
     if groups == 1:
+        print(layout, out_layout)
         # pylint: disable=assignment-from-no-return
         out = topi.nn.conv2d_NCHWc(inputs[0], inputs[1], channels, (kh, kw),
                                    strides, padding, layout, out_layout)
@@ -182,6 +184,8 @@ def compute_contrib_conv2d_NCHWc(attrs, inputs, _):
         raise ValueError("not support arbitrary group number > 1 for now")
     if attrs.get_bool("use_bias"):
         bias = inputs[2]
+        print(out)
+        print(bias)
         bias = topi.expand_dims(bias, axis=1, num_newaxis=2)
         out = topi.add(out, bias)
     return out
@@ -198,8 +202,9 @@ def schedule_contrib_conv2d_NCHWc(attrs, outs, target):
     out_layout = attrs.get_string("out_layout")
     with tvm.target.create(target):
         if groups == 1:
-            return topi.generic.schedule_conv2d_NCHWc(oc, (kh, kw), strides, padding,
-                                                      layout, out_layout, outs)
+            # return topi.generic.schedule_conv2d_NCHWc(oc, (kh, kw), strides, padding,
+            #                                           layout, out_layout, outs)
+            return topi.generic.schedule_conv2d_NCHWc_(outs)
         else:
             raise ValueError("not support group number > 1 for now")
 

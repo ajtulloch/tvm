@@ -17,13 +17,13 @@ target = 'llvm -mcpu=core-avx2'
 ctx = tvm.context(str(target), 0)
 
 @click.command()
-@click.option('--align_8', default=0)
+@click.option('--align', default=0)
 @click.option('--num_iter', default=10)
 @click.option('--num_cycles', default=5)
 @click.option('--opt_level', default=3)
-def run(align_8, num_iter, num_cycles, opt_level):
+def run(align, num_iter, num_cycles, opt_level):
     logging.basicConfig(level=logging.DEBUG)
-    sym = unet.unet(align_8=align_8)
+    sym = unet.unet(alignment=align)
     mod = mx.mod.Module(symbol=sym, context=mx.cpu())
     mod.bind(data_shapes=[('data', (1, 3, 192, 192))])
     mod.init_params()

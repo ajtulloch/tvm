@@ -131,7 +131,10 @@ class Tuner(object):
             i += len(results)
             self.ttl = min(early_stopping + self.best_iter, n_trial) - i
 
-            self.update(inputs, results)
+            try:
+                self.update(inputs, results)
+            except:
+                logger.exception("Failed to update")
             for callback in callbacks:
                 callback(self, inputs, results)
 

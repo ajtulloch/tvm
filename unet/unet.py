@@ -35,11 +35,11 @@ def conv_resize(x, f):
     r = resize(c)
     return r
 
-def unet(align_8=False):
+def unet(alignment=None):
     data = mx.sym.Variable(name='data')
 
     def align(x):
-        return x if not align_8 else ((x + 7 ) // 8) * 8
+        return x if not alignment else ((x + alignment - 1) // alignment) * alignment
 
     (r0, p0) = conv_pool(data, align(12))  # 96x96
     (r1, p1) = conv_pool(r0, align(24))  # 48x48
@@ -56,14 +56,14 @@ def unet(align_8=False):
     return sigmoid(r11)
 
 
-def unet_small(align_8=False):
-    data = mx.sym.Variable(name='data')
+# def unet_small(align_8=False):
+#     data = mx.sym.Variable(name='data')
 
-    def align(x):
-        return x if not align_8 else ((x + 7 ) // 8) * 8
+#     def align(x):
+#         return x if not align_8 else ((x + 7 ) // 8) * 8
 
-    (r0, c0) = conv_pool(data, align(12))  # 96x96
-    r1 = conv_relu(r0, align(24))  # 6x6
-    r2 = relu(conv_resize(r1, align(12)) + c0)
-    r3 = conv(r2, 1)
-    return sigmoid(r3)
+#     (r0, c0) = conv_pool(data, align(12))  # 96x96
+#     r1 = conv_relu(r0, align(24))  # 6x6
+#     r2 = relu(conv_resize(r1, align(12)) + c0)
+#     r3 = conv(r2, 1)
+#     return sigmoid(r3)

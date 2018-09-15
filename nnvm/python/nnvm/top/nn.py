@@ -184,8 +184,6 @@ def compute_contrib_conv2d_NCHWc(attrs, inputs, _):
         raise ValueError("not support arbitrary group number > 1 for now")
     if attrs.get_bool("use_bias"):
         bias = inputs[2]
-        print(out)
-        print(bias)
         bias = topi.expand_dims(bias, axis=1, num_newaxis=2)
         out = topi.add(out, bias)
     return out

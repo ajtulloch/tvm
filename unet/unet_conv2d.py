@@ -250,6 +250,9 @@ def _decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype, n
 def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
                            conv, output, last):
     """schedule implementation"""
+    # import ipdb
+    # ipdb.set_trace()
+
     n, co, oh, ow, vh, vw, vc = s[conv].op.axis
     ci, kh, kw = s[conv].op.reduce_axis
 
@@ -291,6 +294,7 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
 
     if kernel_vec.op.name == 'kernel_vec':
         co, _, _, _, _ = s[kernel_vec].op.axis
+        s[kernel_vec].pragma(co, 'debug_skip_region')
         if autotvm.GLOBAL_SCOPE.in_tuning:
             # kernel packing will be pre-computed during compilation, so we skip
             # this part to make tuning records correct
@@ -302,12 +306,14 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
 
 def _schedule_spatial_pack_NCHWc(cfg, s, conv, last):
     """schedule implementation"""
+    # import ipdb
+    # ipdb.set_trace()
     data_pad = conv.op.input_tensors[0]
     assert data_pad.op.name == "data_pad"
     kernel = conv.op.input_tensors[0]
 
     # schedule 5-D NCHW[x]c conv
-    C, O = conv, conv
+    C = conv
     CC = s.cache_write(C, 'global')
 
     cfg.define_knob('data_pad_inline', [0, 1])
@@ -369,4 +375,13 @@ def _schedule_spatial_pack_NCHWc(cfg, s, conv, last):
     )
 
     s[CC].vectorize(oc_block)
+    if conv != last:
+        batch, oc_chunk, oh, ow, oc_block = s[last].op.axis
+        (ow_chunk, ow_block) = s[last].split(ow, cfg['tile_ow'].size[-1])
+        s[last].reorder(oc_chunk, oh, ow_chunk, ow_block, oc_block)
+        # parallel_axis = s[O].fuse(oc_chunk, oh)
+        s[C].compute_at(s[last], ow_chunk)
+        s[last].vectorize(oc_block)
+        # s[O].parallel(parallel_axis)
+
     return s

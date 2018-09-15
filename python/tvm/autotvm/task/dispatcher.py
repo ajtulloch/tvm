@@ -272,7 +272,6 @@ class ApplyHistoryBest(DispatchContext):
             key = (k, workload)
             if key in self.best_by_targetkey:
                 return self.best_by_targetkey[key][0].config
-
         return None
 
 

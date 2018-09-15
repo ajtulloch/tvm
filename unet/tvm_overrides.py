@@ -3,6 +3,7 @@ import topi.nn.util
 from topi.nn.conv2d import conv2d_alter_layout, _get_workload
 import nnvm.top.registry
 from topi import generic, tag
+from tvm import autotvm
 
 @conv2d_alter_layout.register("cpu", override=True)
 def _alter_conv2d_layout(attrs, inputs, tinfos):
@@ -21,7 +22,16 @@ def _alter_conv2d_layout(attrs, inputs, tinfos):
     stride = ast.literal_eval(attrs['strides'])
 
     wkl = _get_workload(data, kernel, stride, padding, data.dtype)
-    print(wkl)
+    # cfg = autotvm.DispatchContext.current.query(tvm.target.current_target(), wkl)
+
+    # if cfg.is_fallback:  # if is fallback, clear query cache and return None
+    #     autotvm.task.clear_fallback_cache(tvm.target.current_target(), workload)
+    #     return None
+
+    # if cfg.template_key == 'direct' and 'tile_co' in cfg:  # packing weight tensor
+    #     new_attrs['kernel_layout'] = 'OIHW%do' % (cfg['tile_co'].size[-1])
+    #     return sym.conv2d(*copy_inputs, **new_attrs)
+    # print(wkl)
     if wkl.in_filter % 16 == 0 and wkl.out_filter % 16 == 0:
         print("Altering layout to NCHW16c")
         new_attrs['layout'] = 'NCHW16c'
@@ -126,8 +136,6 @@ def _default_declaration_conv_NCHWc(data, kernel, num_filter, kernel_size, strid
                                .astype(out_dtype) *
                                kernel[oc_chunk, ic // CIII, kh, kw, ic % CIII, oc_block],
                                axis=[ic, kh, kw]), name='conv2d_NCHWc', tag="conv2d_NCHWc")
-    import ipdb
-    ipdb.set_trace()
     return conv
 
 topi.nn.conv2d_NCHWc.fdefault = _default_declaration_conv_NCHWc

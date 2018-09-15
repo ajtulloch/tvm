@@ -31,6 +31,7 @@ def schedule_injective(outs):
         s[x].parallel(fused)
     elif len(s[x].op.axis) >= 1:
         s[x].parallel(s[x].op.axis[0])
+    # s[x].vectorize(list(s[x].op.axis)[-1])
     return s
 
 @generic.schedule_concatenate.register(["cpu"])

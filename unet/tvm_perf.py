@@ -6,7 +6,9 @@ import nnvm
 import nnvm.compiler
 
 import tvm
-import tvm_overrides
+
+# import tvm_overrides
+# import unet_conv2d
 
 from tvm.contrib import graph_runtime as runtime
 import time
@@ -34,10 +36,13 @@ def run(align, num_iter, num_cycles, opt_level):
 
     data_shape = (1, 3, 192, 192)
     out_shape = (1, 1, 192, 192)
-    with nnvm.compiler.build_config(opt_level=opt_level):
-        graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
+    with tvm.target.create(target):
+        with nnvm.compiler.build_config(opt_level=opt_level):
+            graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
     module = runtime.create(graph, lib, ctx)
     logging.debug(graph.symbol().debug_str())
+    with open("tvm_perf.log", "w") as f:
+        f.write(graph.symbol().debug_str())
     module.set_input('data', tvm.nd.array(np.random.uniform(size=(data_shape)).astype("float32")))
     rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
     module.set_input(**params)

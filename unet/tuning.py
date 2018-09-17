@@ -172,12 +172,12 @@ def run(align,
 
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
-                   builder=autotvm.LocalBuilder(timeout=30),
+                   builder=autotvm.LocalBuilder(timeout=10),
                    runner=autotvm.RPCRunner(
                        'skl', 'localhost', tracker_port,
                        number=autotvm_number,
                        repeat=autotvm_repeat,
-                       timeout=30)
+                       timeout=10)
                ),
                n_trial=autotvm_n_trial,
                early_stopping=autotvm_early_stopping,

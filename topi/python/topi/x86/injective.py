@@ -25,11 +25,12 @@ def schedule_injective(outs):
     tvm.schedule.AutoInlineInjective(s)
     if len(s[x].op.axis) >= 5:
         fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
-        s[x].parallel(fused)
+        # s[x].parallel(fused)
     elif len(s[x].op.axis) >= 3:
         fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
-        s[x].parallel(fused)
+        # s[x].parallel(fused)
     elif len(s[x].op.axis) >= 1:
+        pass
         s[x].parallel(s[x].op.axis[0])
     # s[x].vectorize(list(s[x].op.axis)[-1])
     return s

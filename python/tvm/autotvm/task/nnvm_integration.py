@@ -135,6 +135,8 @@ class TaskExtractEnv:
             assert layout == 'NCHW', "only support NCHW currently"
             C = topi.nn.conv2d(*args, **kwargs)
             s = topi.generic.schedule_conv2d_nchw([C])
+            import tvm
+            # print(tvm.lower(s, [A, W, C], simple_mode=True))
             return s, [A, W, C]
 
         # Tuning wrapper for topi functions

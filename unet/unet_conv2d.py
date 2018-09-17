@@ -33,15 +33,6 @@ def _conv_NCHWc_arg_to_workload(data, kernel, num_filter, kernel_size, stride, p
 @conv2d.register('cpu', override=True)
 @autotvm.task.dispatcher
 def conv2d_cpu(data, kernel, strides, padding, layout, out_dtype):
-    """TOPI compute callback. Mark this function as a dispatcher, so
-    this template can assign config according to workload
-
-    Returns
-    -------
-    workload: Tuple
-        Dispatcher will use this workload to query corresponding config.
-        Then use cfg.template_key to call a registered template.
-    """
     return _conv_arg_to_workload(data, kernel, strides, padding, layout, out_dtype)
 
 
@@ -176,7 +167,7 @@ def _decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype, n
 
     OH = (IH + pad_top + pad_bottom - KH) // HSTR + 1
     OW = (IW + pad_left + pad_right - KW) // WSTR + 1
-    data_pad = pad(data, [0, 0, pad_top, pad_left], [0, 0, pad_bottom, pad_right])
+    data_pad = pad(data, [0, 0, pad_top, pad_left], [0, 0, pad_bottom, pad_right], name="data_pad")
 
     # ==================== define configuration space ====================
     n, co, oh, ow = cfg.axis(N), cfg.axis(CO), cfg.axis(OH), cfg.axis(OW)
@@ -198,6 +189,13 @@ def _decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype, n
                        policy='candidate', candidate=[
                            [n, co, oh, ow, ci, kh, kw, vh, vw, vc],
                            [n, co, oh, ow, ci, kh, kw, vc, vh, vw]])
+
+    cfg.define_reorder("reorder_1",
+                       [n, co, oh, ow, vh, vw, vc],
+                       policy='candidate', candidate=[
+                           [n, co, oh, ow, vh, vw, vc],
+                           [n, co, oh, ow, vc, vh, vw],
+                           [n, co, oh, ow, vh, vc, vw]])
 
     cfg.define_annotate("ann_reduce", [kh, kw], policy='try_unroll')
     cfg.define_annotate("ann_spatial", [vh, vw, vc], policy='try_unroll_vec')
@@ -255,7 +253,14 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
 
     n, co, oh, ow, vh, vw, vc = s[conv].op.axis
     ci, kh, kw = s[conv].op.reduce_axis
+    data_pad = data_vec.op.input_tensors[0]
+    assert data_pad.op.name == "data_pad"
+    cfg.define_knob('data_pad_inline', [0, 1, 2])
 
+    if cfg['data_pad_inline'].val == 1:
+        s[data_pad].compute_inline()
+    if cfg['data_pad_inline'].val == 2:
+        s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
     # schedule conv
     cfg["reorder_0"].apply(s, conv, [n, co, oh, ow, ci, kh, kw, vh, vw, vc])
     cfg["ann_reduce"].apply(s, conv, [kh, kw],
@@ -275,7 +280,7 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
     co, vc = cfg['tile_co'].apply(s, last, co)
     oh, vh = cfg['tile_oh'].apply(s, last, h)
     ow, vw = cfg['tile_ow'].apply(s, last, w)
-    s[last].reorder(n, co, oh, ow, vh, vw, vc)
+    cfg["reorder_1"].apply(s, last, [n, co, oh, ow, vh, vw, vc])
     if last != output:
         s[output].compute_inline()
         cfg["ann_spatial"].apply(s, last, [vh, vw, vc],
@@ -284,6 +289,8 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
                                             cfg['tile_co'].size[-1]],
                                  max_unroll=16,
                                  cfg=cfg)
+    else:
+        s[last].vectorize(vw)
     s[conv].compute_at(s[last], ow)
 
     # mark parallel

@@ -133,6 +133,7 @@ def tune_tasks(tasks,
 @click.option('--autotvm_n_trial', default=200)
 @click.option('--autotvm_early_stopping', default=100)
 @click.option('--autotvm_log', default="autotvm_unet_tuning.log", type=str)
+@click.option('--tracker_port', default=9195)
 @click.option('--opt_level', default=3)
 def run(align,
         num_iter,
@@ -142,6 +143,7 @@ def run(align,
         autotvm_log,
         autotvm_n_trial,
         autotvm_early_stopping,
+        tracker_port,
         opt_level):
     logging.basicConfig(level=logging.DEBUG)
     sym = unet.unet(alignment=align)
@@ -170,12 +172,12 @@ def run(align,
 
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
-                   builder=autotvm.LocalBuilder(timeout=500),
+                   builder=autotvm.LocalBuilder(timeout=30),
                    runner=autotvm.RPCRunner(
-                       'skl', 'localhost', 9190,
+                       'skl', 'localhost', tracker_port,
                        number=autotvm_number,
                        repeat=autotvm_repeat,
-                       timeout=500)
+                       timeout=30)
                ),
                n_trial=autotvm_n_trial,
                early_stopping=autotvm_early_stopping,

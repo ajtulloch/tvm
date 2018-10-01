@@ -44,8 +44,8 @@ def run(align, num_iter, num_cycles, opt_level):
     with open("tvm_perf.log", "w") as f:
         f.write(graph.symbol().debug_str())
     module.set_input('data', tvm.nd.array(np.random.uniform(size=(data_shape)).astype("float32")))
-    rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
-    module.set_input(**params)
+    # rparams = {k: tvm.nd.array(v.shape, ctx) for k, v in params.items()}
+    # module.set_input(**params)
     module.run()
     out = module.get_output(0, tvm.nd.empty(out_shape, ctx=ctx))
     out.asnumpy()

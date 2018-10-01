@@ -212,6 +212,8 @@ class CompileEngine {
         CHECK_EQ(out[i].ndim(), out_info[i].ndim()) << inode.source->op()->name;
         tvm::Tensor inferred_tensor = out[i];
         tvm::Tensor computed_tensor = out_info[i];
+        LOG(ERROR) << inferred_tensor->shape;
+        LOG(ERROR) << computed_tensor->shape;
         for (uint32_t j = 0; j < inferred_tensor->shape.size(); ++j) {
           if ((as_const_int(inferred_tensor->shape[j])) &&
               (as_const_int(computed_tensor->shape[j])))

@@ -2,6 +2,7 @@
 from __future__ import absolute_import
 import topi
 from ..util import simplify
+import tvm
 
 
 def upsampling(data, scale, layout="NCHW", method='NEAREST_NEIGHBOR'):
@@ -35,7 +36,14 @@ def upsampling(data, scale, layout="NCHW", method='NEAREST_NEIGHBOR'):
         out_shape = (simplify(data.shape[2] * scale), simplify(data.shape[3] * scale))
     elif layout == "NHWC":
         out_shape = (simplify(data.shape[1] * scale), simplify(data.shape[2] * scale))
+    elif layout == "NCHW16c":
+        (N, C, H, W, _16) = data.shape
+        out_shape = (simplify(H * scale), simplify(W * scale))
     else:
         raise ValueError("not support this layout {} yet".format(layout))
 
     return topi.cpp.nn.upsampling(data, out_shape, layout, method)
+
+@tvm.target.generic_func
+def upsampling_alter_layout(attrs, inputs, tinfos):
+    return None

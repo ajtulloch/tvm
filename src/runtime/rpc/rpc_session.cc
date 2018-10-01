@@ -1205,6 +1205,12 @@ PackedFunc WrapTimeEvaluator(PackedFunc pf, TVMContext ctx, int number, int repe
       }
       DeviceAPI::Get(ctx)->StreamSync(ctx, nullptr);
       auto tend = std::chrono::high_resolution_clock::now();
+      LOG(ERROR) << "Average time taken per iteration (us): "
+                << static_cast<double>(
+                       std::chrono::duration_cast<std::chrono::microseconds>(
+                           tend - tbegin)
+                           .count()) /
+                       number;
       double speed = std::chrono::duration_cast<std::chrono::duration<double> >(
           tend - tbegin).count() / number;
       os.write(reinterpret_cast<char*>(&speed), sizeof(speed));

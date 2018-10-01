@@ -38,12 +38,13 @@ inline bool UpSamplingInferShape(const nnvm::NodeAttrs& attrs,
   if (dshape.ndim() ==  0) return false;
 
   dshape = ConvertLayout(dshape, param.layout, kNCHW);
+  LOG(INFO) << "Inferring shape, dshape: " << dshape;
   TShape oshape = dshape;
   oshape[2] = oshape[2] * param.scale;
   oshape[3] = oshape[3] * param.scale;
   oshape = ConvertLayout(oshape, kNCHW, param.layout);
   NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
-
+  LOG(INFO) << "Inferring shape, oshape: " << oshape;
   return true;
 }
 
@@ -93,6 +94,9 @@ NNVM_REGISTER_OP(upsampling)
   if (param.layout == "NCHW") {
     oshape.push_back(out_info[0]->shape[2]);
     oshape.push_back(out_info[0]->shape[3]);
+  } else if (param.layout == "NCHW16c") {
+      oshape.push_back(out_info[0]->shape[2]);
+      oshape.push_back(out_info[0]->shape[3]);
   } else {
     oshape.push_back(out_info[0]->shape[1]);
     oshape.push_back(out_info[0]->shape[2]);

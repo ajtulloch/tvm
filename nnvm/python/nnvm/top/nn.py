@@ -338,6 +338,10 @@ def schedule_upsampling(_, outs, target):
     with tvm.target.create(target):
         return topi.generic.schedule_injective(outs)
 
+@reg.register_alter_op_layout("upsampling")
+def alter_upsampling_layout(attrs, inputs, tinfos):
+    return topi.nn.upsampling_alter_layout(attrs, inputs, tinfos)
+
 reg.register_pattern("upsampling", OpPattern.INJECTIVE)
 
 @reg.register_compute("lrn")

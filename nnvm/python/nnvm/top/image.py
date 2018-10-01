@@ -7,7 +7,7 @@ import topi
 from . import registry as reg
 from .registry import OpPattern
 
-# resize
+
 @reg.register_schedule("resize")
 def schedule_resize(_, outs, target):
     """Schedule definition of resize"""

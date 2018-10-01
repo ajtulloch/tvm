@@ -159,6 +159,7 @@ class Module(ModuleBase):
                 blob = feval(*args)
                 fmt = "@" + ("d" * repeat)
                 results = struct.unpack(fmt, blob)
+                print(results)
                 mean = sum(results) / float(repeat)
                 return ProfileResult(mean=mean, results=results)
 

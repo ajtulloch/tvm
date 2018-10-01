@@ -94,6 +94,33 @@ inline Tensor resize_nearest_neighbor_nchw(const Tensor& input,
     }, name, tag);
 }
 
+ inline Tensor resize_nearest_neighbor_NCHWc(const Tensor& input,
+                                             const Array<Expr>& shape,
+                                             bool align_corners = false,
+                                             std::string name = "tensor",
+                                             std::string tag = kInjective) {
+   Array<Expr> out_shape;
+   out_shape.push_back(input->shape[0]);
+   out_shape.push_back(input->shape[1]);
+   out_shape.push_back(shape[0]);
+   out_shape.push_back(shape[1]);
+   out_shape.push_back(input->shape[4]);
+   LOG(INFO) << "Computed out shape: " << out_shape;
+   Expr h_ratio = shape[0] / input->shape[2];
+   Expr w_ratio = shape[1] / input->shape[3];
+
+   return compute(
+                  out_shape, [&](const Array<Var>& indices) {
+                    Array<Expr> idx;
+                    idx.push_back(indices[0]);
+                    idx.push_back(indices[1]);
+                    idx.push_back(indices[2] / h_ratio);
+                    idx.push_back(indices[3] / w_ratio);
+                    idx.push_back(indices[4]);
+                    return input(idx);
+                  }, name, tag);
+ }
+
 /*!
 * \brief Resize given tensor to given shape using nearest neighbour
 *
@@ -116,6 +143,8 @@ inline Tensor resize_nearest_neighbor(const Tensor& input,
 
   if (layout == "NHWC") {
     return resize_nearest_neighbor_nhwc(input, shape, align_corners);
+  } else if (layout == "NCHW16c") {
+    return resize_nearest_neighbor_NCHWc(input, shape, align_corners);
   } else {
     return resize_nearest_neighbor_nchw(input, shape, align_corners);
   }

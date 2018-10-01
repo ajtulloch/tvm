@@ -1,6 +1,7 @@
 import tvm
 import topi.nn.util
 from topi.nn.conv2d import conv2d_alter_layout, _get_workload
+from topi.nn.upsampling import upsampling_alter_layout
 import nnvm.top.registry
 from topi import generic, tag
 from tvm import autotvm
@@ -61,6 +62,21 @@ def alter_max_pool2d_layout(attrs, inputs, tinfos):
     # if CI % 8 == 0:
     #     new_attrs['layout'] = 'NCHW8c'
     #     return sym.max_pool2d(*copy_inputs, **new_attrs)
+
+@upsampling_alter_layout.register("cpu", override=True)
+def _upsampling_alter_layout(attrs, inputs, tinfos):
+    import nnvm.symbol as sym
+    copy_inputs = [s for s in inputs]
+    new_attrs = {k : attrs[k] for k in attrs.keys()}
+    print(new_attrs)
+    if attrs['layout'] != 'NCHW':
+        return None
+
+    data = tinfos[0]
+    _, CI, _, _ = [x.value for x in data.shape]
+    if CI % 16 == 0:
+        new_attrs['layout'] = 'NCHW16c'
+        return sym.upsampling(*copy_inputs, **new_attrs)
 
 @generic.schedule_pool.register(["cpu"], override=True)
 def schedule_pool(outs, layout):

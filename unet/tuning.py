@@ -13,7 +13,7 @@ import tvm_overrides
 import unet_conv2d
 import unet
 
-target = 'llvm -mcpu=core-avx2 -target=x86_64-linux-gnu'
+target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
 # target = 'llvm -mcpu=core-avx2'
 ctx = tvm.context(str(target), 0)
 

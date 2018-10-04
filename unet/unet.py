@@ -1,6 +1,5 @@
 import mxnet as mx
 import numpy as np
-import nnvm
 
 
 def conv(x, num_filter):

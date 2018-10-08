@@ -36,7 +36,6 @@ def score(sym, data_shape, dev, batch_size, num_batches):
 def run(align, num_iter, num_cycles):
     data_shape = (1, 3, 192, 192)
     batch_size = 1
-    num_iter = 100
     sym = unet.unet(alignment=align)
     for f in range(num_cycles):
         print("MXNet time: ", score(sym, [('data', data_shape)], mx.cpu(), batch_size, num_batches=num_iter))

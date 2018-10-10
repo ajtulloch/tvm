@@ -216,6 +216,7 @@ inline bool ExpandDimsInferShape(const NodeAttrs& attrs,
   CHECK_EQ(in_shape->size(), 1U);
   const TShape& dshape = in_shape->at(0);
   int ndim = static_cast<int>(dshape.ndim());
+  LOG(ERROR) << dshape;
   CHECK(param.axis >= -ndim - 1 && param.axis <= ndim)
     << "with axis = " << param.axis << " ndim = " << ndim;
   int axis = param.axis < 0 ? ndim + param.axis + 1 : param.axis;

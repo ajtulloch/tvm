@@ -78,7 +78,16 @@ class LLVMModuleNode final : public runtime::ModuleNode {
           pass, dest, nullptr, llvm::TargetMachine::CGFT_ObjectFile) == 0)
           << "Cannot emit target CGFT_ObjectFile";
 #endif
+      // LOG(ERROR) << "Verifying module";
+      for (const auto &f : m->functions()) {
+        // LOG(INFO) << "Verifying function: " << std::string(f.getName());
+        llvm::verifyFunction(f, &llvm::errs());
+      }
+      llvm::verifyModule(*m, &llvm::errs());
+      // LOG(ERROR)<< "Running passes to save .o file";
+
       pass.run(*m);
+      LOG(ERROR) << "Ran passes to save .o file";
     } else if (fmt == "s" || fmt == "asm") {
 #if TVM_LLVM_VERSION <= 60
       std::unique_ptr<llvm::Module> m = llvm::CloneModule(mptr_);

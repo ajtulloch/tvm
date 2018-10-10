@@ -184,6 +184,7 @@ class CompileEngine {
       Array<Tensor> op_inputs, out_info;
       readable_name_os << "_" << inode.source->op()->name;
       // input array
+
       for (const IndexedGraph::NodeEntry& e : inode.inputs) {
         const tvm::Tensor& t = tensor_vec[idx.entry_id(e)];
         CHECK(t.defined());
@@ -203,17 +204,16 @@ class CompileEngine {
       // get default
       Array<Tensor> out = fcompute[inode.source->op()](
           inode.source->attrs, op_inputs, out_info);
+
       CHECK_EQ(out.size(), inode.source->num_outputs());
 
       // check output dimentions also match
       // This check is to make sure the NNVM operator Infer match with Compute result.
       // Missing this check may pass the build but leads to runtime errors.
       for (uint32_t i = 0; i < out.size(); ++i) {
-        CHECK_EQ(out[i].ndim(), out_info[i].ndim()) << inode.source->op()->name;
         tvm::Tensor inferred_tensor = out[i];
         tvm::Tensor computed_tensor = out_info[i];
-        LOG(ERROR) << inferred_tensor->shape;
-        LOG(ERROR) << computed_tensor->shape;
+        CHECK_EQ(out[i].ndim(), out_info[i].ndim()) << inode.source->op()->name;
         for (uint32_t j = 0; j < inferred_tensor->shape.size(); ++j) {
           if ((as_const_int(inferred_tensor->shape[j])) &&
               (as_const_int(computed_tensor->shape[j])))

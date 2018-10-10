@@ -39,11 +39,11 @@ def _alter_conv2d_layout(attrs, inputs, tinfos):
         new_attrs['out_layout'] = 'NCHW16c'
         new_attrs['kernel_layout'] = 'OIHW16i16o'
         return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
-    # if wkl.in_filter % 8 == 0 and wkl.out_filter % 8 == 0:
-    #     new_attrs['layout'] = 'NCHW8c'
-    #     new_attrs['out_layout'] = 'NCHW8c'
-    #     new_attrs['kernel_layout'] = 'OIHW8i8o'
-    #     return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+    if wkl.in_filter % 3 == 0 and wkl.out_filter % 16 == 0:
+        new_attrs['layout'] = 'NCHW3c'
+        new_attrs['out_layout'] = 'NCHW16c'
+        new_attrs['kernel_layout'] = 'OIHW3i16o'
+        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
 
 # # data = sym.max_pool2d(data=data, pool_size=(2, 2), strides=(2, 2), layout=layout)
 @nnvm.top.registry.register_alter_op_layout("max_pool2d")

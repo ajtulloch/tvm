@@ -70,8 +70,8 @@ def decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, 
     N, CII, IH, IW, CIII = topi.util.get_const_tuple(data.shape)
     COO, CII_, KH, KW, CIII_, COOO = topi.util.get_const_tuple(kernel.shape)
     assert CIII == CIII_
-    OH = (IH + 2 * HPAD - 3) // HSTR + 1
-    OW = (IW + 2 * WPAD - 3) // WSTR + 1
+    OH = (IH + 2 * HPAD - KH) // HSTR + 1
+    OW = (IW + 2 * WPAD - KW) // WSTR + 1
 
 
     # pack data
@@ -316,7 +316,12 @@ def _schedule_spatial_pack_NCHWc(cfg, s, conv, last):
     # import ipdb
     # ipdb.set_trace()
     data_pad = conv.op.input_tensors[0]
-    assert data_pad.op.name == "data_pad"
+    if data_pad.op.name == "data_pad":
+        assert type(data_pad.op) == tvm.tensor.ComputeOp
+        has_padding = True
+    else:
+        assert type(data_pad.op) == tvm.tensor.PlaceholderOp
+        has_padding = False
     kernel = conv.op.input_tensors[0]
 
     # schedule 5-D NCHW[x]c conv
@@ -324,7 +329,7 @@ def _schedule_spatial_pack_NCHWc(cfg, s, conv, last):
     CC = s.cache_write(C, 'global')
 
     cfg.define_knob('data_pad_inline', [0, 1])
-    if cfg['data_pad_inline'].val:
+    if cfg['data_pad_inline'].val and has_padding:
         s[data_pad].compute_inline()
 
     _, oc_chunk, oh, ow, oc_block = s[C].op.axis

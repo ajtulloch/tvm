@@ -11,7 +11,8 @@ import time
 import tvm
 import tvm_overrides
 import unet_conv2d
-import unet
+
+import models
 
 target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
 # target = 'llvm -mcpu=core-avx2'
@@ -73,8 +74,17 @@ def build_until_compile(graph, target=None, shape=None, dtype="float32",
         _remove_noref_params(params, graph)
 
         # Precompute prune
-        if params and cfg.pass_enabled("PrecomputePrune"):
-            graph, params = precompute_prune(graph, params)
+        graph, params = precompute_prune(graph, params)
+        shape, dtype = _update_shape_dtype(shape, dtype, params)
+
+        # Operator Fusion and generation
+        graph = graph_attr.set_shape_inputs(graph, shape)
+        graph = graph.apply("InferShape")
+        graph = graph_attr.set_dtype_inputs(graph, dtype)
+        graph._set_json_attr("target", str(target), "str")
+        if target_host is not None:
+            graph._set_json_attr("target_host", str(target_host), "str")
+
         return graph, params
 
 
@@ -128,7 +138,7 @@ def tune_tasks(tasks,
 @click.option('--align', default=8)
 @click.option('--num_iter', default=10)
 @click.option('--num_cycles', default=5)
-@click.option('--model', type=click.Choice(['unet', 'resnet50'])
+@click.option('--model', type=click.Choice(['unet', 'resnet50']), required=True)
 @click.option('--autotvm_number', default=50)
 @click.option('--autotvm_repeat', default=4)
 @click.option('--autotvm_n_trial', default=200)
@@ -148,30 +158,33 @@ def run(align,
         tracker_port,
         opt_level):
     logging.basicConfig(level=logging.DEBUG)
-    sym = unet.unet(alignment=align)
-    mod = mx.mod.Module(symbol=sym, context=mx.cpu())
-    mod.bind(data_shapes=[('data', (1, 3, 192, 192))])
-    mod.init_params()
-    sym, params = nnvm.frontend.from_mxnet(sym, arg_params=mod.get_params()[0], aux_params=mod.get_params()[1])
+    sym, image_shape, output_shape = models.get_mxnet_symbol(model, align)
+    sym, params = models.get_nnvm_sym(sym, image_shape)
+    # import ipdb; ipdb.set_trace()
+    # print(params)
     assert params
 
-    data_shape = (1, 3, 192, 192)
-    out_shape = (1, 1, 192, 192)
+    data_shape = tuple([1] + list(image_shape))
     with nnvm.compiler.build_config(opt_level=opt_level):
-        sym, params = build_until_compile(sym, target, dict(data=data_shape), params=params)
-    print(sym.symbol().debug_str())
-
-    tasks = autotvm.task.extract_from_graph(
-        sym,
-        target=target,
-        shape=dict(data=data_shape),
-        dtype="float32",
-        symbols=[
-            nnvm.sym.conv2d,
-            nnvm.sym.contrib.conv2d_NCHWc,
-        ]
-    )
-
+        graph, lib, params = nnvm.compiler.build(sym, target, dict(data=data_shape), params=params)
+    # with nnvm.compiler.build_config(opt_level=opt_level):
+    #     sym, params = build_until_compile(sym, target, dict(data=data_shape), params=params)
+    print("Succesfully built")
+    # # print(sym.symbol().debug_str())
+    # # import ipdb; ipdb.set_trace()
+    with nnvm.compiler.build_config(opt_level=opt_level):
+        tasks = autotvm.task.extract_from_graph(
+            sym,
+            target=target,
+            shape=dict(data=data_shape),
+            dtype="float32",
+            symbols=[
+                nnvm.sym.conv2d,
+                nnvm.sym.contrib.conv2d_NCHWc,
+            ]
+        )
+    print(tasks)
+    # import ipdb; ipdb.set_trace()
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
                    builder=autotvm.LocalBuilder(timeout=10),

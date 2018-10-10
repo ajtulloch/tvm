@@ -3,7 +3,7 @@ import time
 import click
 
 
-import unet
+import models
 
 def score(sym, data_shape, dev, batch_size, num_batches):
     # get mod
@@ -33,12 +33,13 @@ def score(sym, data_shape, dev, batch_size, num_batches):
 @click.option('--align', default=0)
 @click.option('--num_iter', default=10)
 @click.option('--num_cycles', default=5)
-def run(align, num_iter, num_cycles):
-    data_shape = (1, 3, 192, 192)
-    batch_size = 1
-    sym = unet.unet(alignment=align)
+@click.option('--model', type=click.Choice(['unet', 'resnet50']), required=True)
+def run(align, num_iter, num_cycles, model):
+    sym, image_shape, output_shape = models.get_mxnet_symbol(model, align)
+    data_shape = tuple([1] + list(image_shape))
+
     for f in range(num_cycles):
-        print("MXNet time: ", score(sym, [('data', data_shape)], mx.cpu(), batch_size, num_batches=num_iter))
+        print("MXNet time: ", score(sym, [('data', data_shape)], mx.cpu(), 1, num_batches=num_iter))
         time.sleep(1)
 
 

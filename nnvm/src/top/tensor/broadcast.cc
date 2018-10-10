@@ -201,28 +201,30 @@ inline bool BinaryBroadcastCorrectLayout(const NodeAttrs& attrs,
   return true;
 }
 
-#define NNVM_REGISTER_BINARY_BROADCAST_OP(name, TOPIOp)             \
-  NNVM_REGISTER_OP(name)                                            \
-  .set_num_inputs(2)                                                \
-  .set_num_outputs(1)                                               \
-  .set_attr<FInferShape>("FInferShape", BinaryBroadcastShape)       \
-  .set_attr<FInferType>("FInferType", ElemwiseType<2, 1>)           \
-  .set_attr<FCorrectLayout>("FCorrectLayout",                       \
-    BinaryBroadcastCorrectLayout)                                   \
-  .set_attr<FInplaceOption>("FInplaceOption",                       \
-    [](const NodeAttrs& attrs) {                                    \
-      return std::vector<std::pair<int, int> >{{0, 0}, {1, 0}};     \
-    })                                                              \
-  .set_attr<FTVMCompute>(                                           \
-    "FTVMCompute", [](const NodeAttrs& attrs,                       \
-      const Array<Tensor>& inputs,                                  \
-      const Array<Tensor>& out_info) {                              \
-        return Array<Tensor>{                                       \
-          topi::TOPIOp(inputs[0], inputs[1]) };                     \
-    })                                                              \
-  .add_argument("lhs", "Tensor", "first input")                     \
-  .add_argument("rhs", "Tensor", "second input")
-
+#define NNVM_REGISTER_BINARY_BROADCAST_OP(name, TOPIOp)                        \
+  NNVM_REGISTER_OP(name)                                                       \
+      .set_num_inputs(2)                                                       \
+      .set_num_outputs(1)                                                      \
+      .set_attr<FInferShape>("FInferShape", BinaryBroadcastShape)              \
+      .set_attr<FInferType>("FInferType", ElemwiseType<2, 1>)                  \
+      .set_attr<FCorrectLayout>("FCorrectLayout",                              \
+                                BinaryBroadcastCorrectLayout)                  \
+      .set_attr<FInplaceOption>(                                               \
+          "FInplaceOption",                                                    \
+          [](const NodeAttrs &attrs) {                                         \
+            return std::vector<std::pair<int, int>>{{0, 0}, {1, 0}};           \
+          })                                                                   \
+      .set_attr<FTVMCompute>(                                                  \
+          "FTVMCompute",                                                       \
+          [](const NodeAttrs &attrs, const Array<Tensor> &inputs,              \
+             const Array<Tensor> &out_info) {                                  \
+            LOG(ERROR) << "Invoking broadcast_ op ftvmcompute";                \
+            LOG(ERROR) << inputs[0]->shape;                              \
+              LOG(ERROR) << inputs[1]->shape;                            \
+            return Array<Tensor>{topi::TOPIOp(inputs[0], inputs[1])};          \
+          })                                                                   \
+      .add_argument("lhs", "Tensor", "first input")                            \
+      .add_argument("rhs", "Tensor", "second input")
 
 NNVM_REGISTER_BINARY_BROADCAST_OP(broadcast_add, add)
 .add_alias("__add_symbol__")

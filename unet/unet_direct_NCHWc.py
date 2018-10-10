@@ -15,8 +15,9 @@ def decl_direct_NCHWc(cfg, data, kernel, strides, padding, out_dtype):
 
     N, CII, IH, IW, CIII = topi.util.get_const_tuple(data.shape)
     COO, CII_, KH, KW, CIII_, COOO = topi.util.get_const_tuple(kernel.shape)
-    OH = (IH + 2 * HPAD - 3) // HSTR + 1
-    OW = (IW + 2 * WPAD - 3) // WSTR + 1
+    OH = (IH + 2 * HPAD - KH) // HSTR + 1
+    OW = (IW + 2 * WPAD - KW) // WSTR + 1
+
 
     data_pad = topi.nn.pad(data, (0, 0, HPAD, WPAD, 0), name="data_pad")
     cfg.define_split('tile_ow', cfg.axis(OW), num_outputs=2, filter=lambda x: x.size[-1] <= 6)

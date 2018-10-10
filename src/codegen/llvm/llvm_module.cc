@@ -87,7 +87,6 @@ class LLVMModuleNode final : public runtime::ModuleNode {
       // LOG(ERROR)<< "Running passes to save .o file";
 
       pass.run(*m);
-      LOG(ERROR) << "Ran passes to save .o file";
     } else if (fmt == "s" || fmt == "asm") {
 #if TVM_LLVM_VERSION <= 60
       std::unique_ptr<llvm::Module> m = llvm::CloneModule(mptr_);

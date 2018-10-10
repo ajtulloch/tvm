@@ -254,12 +254,18 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
     n, co, oh, ow, vh, vw, vc = s[conv].op.axis
     ci, kh, kw = s[conv].op.reduce_axis
     data_pad = data_vec.op.input_tensors[0]
-    assert data_pad.op.name == "data_pad"
+    if data_pad.op.name == "data_pad":
+        assert type(data_pad.op) == tvm.tensor.ComputeOp
+        has_padding = True
+    else:
+        import ipdb; ipdb.set_trace()
+        assert type(data_pad.op) == tvm.tensor.PlaceholderOp
+        has_padding = False
     cfg.define_knob('data_pad_inline', [0, 1, 2])
 
-    if cfg['data_pad_inline'].val == 1:
+    if cfg['data_pad_inline'].val == 1 and has_padding:
         s[data_pad].compute_inline()
-    if cfg['data_pad_inline'].val == 2:
+    if cfg['data_pad_inline'].val == 2 and has_padding:
         s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
     # schedule conv
     cfg["reorder_0"].apply(s, conv, [n, co, oh, ow, ci, kh, kw, vh, vw, vc])

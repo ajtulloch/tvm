@@ -136,8 +136,6 @@ def tune_tasks(tasks,
 
 @click.command()
 @click.option('--align', default=8)
-@click.option('--num_iter', default=10)
-@click.option('--num_cycles', default=5)
 @click.option('--model', type=click.Choice(['unet', 'resnet50']), required=True)
 @click.option('--autotvm_number', default=50)
 @click.option('--autotvm_repeat', default=4)
@@ -147,8 +145,6 @@ def tune_tasks(tasks,
 @click.option('--tracker_port', default=9195)
 @click.option('--opt_level', default=3)
 def run(align,
-        num_iter,
-        num_cycles,
         model,
         autotvm_number,
         autotvm_repeat,

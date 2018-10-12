@@ -15,19 +15,20 @@ import unet_conv2d
 
 @autotvm.template
 def conv2d_NCHWc_direct_autotvm(s, ic, oc, kernel, pad, stride):
-    ic = ((ic + 16 - 1) // 16) * 16
-    oc = ((oc + 16 - 1) // 16) * 16
+    # ic = ((ic + 16 - 1) // 16) * 16
+    # oc = ((oc + 16 - 1) // 16) * 16
     cfg = autotvm.get_config()
-    cfg.define_knob('BNInput', [8, 16])
-    cfg.define_knob('BNOutput', [8, 16])
+    cfg.define_knob('BNInput', [4, 8, 16]) # TODO, 8, 16
+    cfg.define_knob('BNOutput', [8, 16]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
     X = tvm.placeholder(shape=(1, ic // BNInput, s, s, BNInput), dtype="float32", name="X")
     W = tvm.placeholder(shape=(oc // BNOutput, ic // BNInput, kernel, kernel, BNInput, BNOutput), dtype="float32", name="W")
 
-    Y = unet_direct_NCHWc.decl_direct_NCHWc(cfg, X, W, strides=stride, padding=pad, out_dtype="float32")
-    s = unet_direct_NCHWc.schedule_direct_NCHWc(cfg, Y)
-    # print(tvm.lower(s, [X, W, Y], simple_mode=True))
+    Y = unet_conv2d._decl_spatial_pack_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="float32")
+    s = tvm.create_schedule([Y.op])
+    s = unet_conv2d._schedule_spatial_pack_NCHWc(cfg, s, Y, Y)
+    print(tvm.lower(s, [X, W, Y], simple_mode=True))
     return s, [X, W, Y]
 
 
@@ -56,7 +57,7 @@ def conv2d_NCHW_direct_autotvm(s, ic, oc, kernel, pad, stride):
     if isinstance(kernel.op, tvm.tensor.ComputeOp) and "dilate" in kernel.op.tag:
         s[kernel].compute_inline()
     s = unet_conv2d._schedule_spatial_pack(cfg, s, data_vec, kernel_vec, conv, Y, Y)
-    # print(tvm.lower(s, [X, W, Y], simple_mode=True))
+    print(tvm.lower(s, [X, W, Y], simple_mode=True))
     return s, [X, W, Y]
 
 
@@ -65,8 +66,9 @@ def conv2d_NCHW_direct_autotvm(s, ic, oc, kernel, pad, stride):
 # Workload = collections.namedtuple("Workload", ["space", "input_channel", "output_channel", "kernel", "pad", "stride"])
 
 WORKLOADS = [
-        Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
-        Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
+        # Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
+        # Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 0, 0, 1, 1),
+        # Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 64, 128, 3, 3, 1, 1, 2, 2),
         Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 2, 2),
@@ -120,6 +122,7 @@ WORKLOADS = [
 ]
 
 target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
+local_target = 'llvm -mcpu=core-avx2'
 
 @click.command()
 @click.option('--autotvm_number', default=50)
@@ -129,13 +132,15 @@ target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
 @click.option('--autotvm_log', default="autotvm_direct_benchmark.log", type=str)
 @click.option('--layout', type=click.Choice(["NCHW", "NCHWc"]), required=True)
 @click.option('--tracker_port', default=9195)
+@click.option('--local', is_flag=True, default=False)
 def run(layout,
         autotvm_number,
         autotvm_repeat,
         autotvm_log,
         autotvm_n_trial,
         autotvm_early_stopping,
-        tracker_port):
+        tracker_port,
+        local):
     logging.basicConfig(level=logging.DEBUG)
     for i, w in enumerate(WORKLOADS):
         if w.in_filter % 16 != 0 or w.out_filter % 16 != 0:
@@ -146,13 +151,17 @@ def run(layout,
                 'skl', 'localhost', tracker_port,
                 number=autotvm_number,
                 repeat=autotvm_repeat,
-                timeout=10)
+                timeout=10) if not local else
+            autotvm.LocalRunner(
+                timeout=10,
+                number=autotvm_number,
+                repeat=autotvm_repeat)
         )
 
         task = autotvm.task.create(
             conv2d_NCHWc_direct_autotvm if layout == "NCHWc" else conv2d_NCHW_direct_autotvm,
             args=(w.height, w.in_filter, w.out_filter, w.hkernel, w.hpad, w.hstride),
-            target=tvm.target.create(target))
+            target=tvm.target.create(target if not local else local_target))
         print(task.config_space)
         tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
         tuner.tune(

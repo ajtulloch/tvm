@@ -15,8 +15,7 @@ import unet_conv2d
 import models
 
 target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
-# target = 'llvm -mcpu=core-avx2'
-ctx = tvm.context(str(target), 0)
+local_target = 'llvm -mcpu=core-avx2'
 
 
 def build_until_compile(graph, target=None, shape=None, dtype="float32",
@@ -183,12 +182,12 @@ def run(align,
     # import ipdb; ipdb.set_trace()
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(
-                   builder=autotvm.LocalBuilder(timeout=10),
+                   builder=autotvm.LocalBuilder(timeout=50),
                    runner=autotvm.RPCRunner(
                        'skl', 'localhost', tracker_port,
                        number=autotvm_number,
                        repeat=autotvm_repeat,
-                       timeout=10)
+                       timeout=50)
                ),
                n_trial=autotvm_n_trial,
                early_stopping=autotvm_early_stopping,

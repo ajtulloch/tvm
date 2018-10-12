@@ -17,76 +17,6 @@ import models
 target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
 local_target = 'llvm -mcpu=core-avx2'
 
-
-def build_until_compile(graph, target=None, shape=None, dtype="float32",
-                        params=None, target_host=None, layout=None):
-    from nnvm.compiler.build_module import (
-        BuildConfig, _update_shape_dtype, _graph, graph_attr, graph_util,
-        _all_var_init, initialize_variables, optimize, _remove_noref_params, precompute_prune)
-    target = target if target else tvm.target.current_target()
-    if target is None:
-        raise ValueError("Target is not set in env or passed as argument.")
-    target = tvm.target.create(target)
-
-    # If current dispatch context is fallback context (the default root context),
-    # then load pre-tuned parameters from TopHub
-    if isinstance(autotvm.DispatchContext.current, autotvm.FallbackContext):
-        tophub_context = autotvm.tophub.context(target)
-    else:
-        tophub_context = autotvm.util.EmptyContext()
-
-    with tophub_context:
-        shape = shape if shape else {}
-        if not isinstance(shape, dict):
-            raise TypeError("require shape to be dict")
-        for value in shape.values():
-            if not all(isinstance(x, int) for x in value):
-                raise TypeError("shape value must be int iterator")
-
-        cfg = BuildConfig.current
-        graph = graph if isinstance(graph, _graph.Graph) else _graph.create(graph)
-        shape, dtype = _update_shape_dtype(shape, dtype, params)
-
-        # correct layout if necessary
-        layout = layout if layout else {}
-        graph = graph_attr.set_layout_inputs(graph, layout)
-        graph = graph.apply("CorrectLayout")
-        index = graph.index
-        layouts = graph.json_attr("layout")
-        layout = {x: layouts[index.entry_id(x)] for x in index.input_names}
-
-        # Initial pass do shape type inference
-        ishape, _ = graph_util.infer_shape(graph, **shape)
-        shape.update(zip(graph.index.input_names, ishape))
-        if not isinstance(dtype, str):
-            idtype, _ = graph_util.infer_dtype(graph, **dtype)
-            dtype.update(zip(graph.index.input_names, idtype))
-        # Initialize all variables specified in _all_var_init
-        init_var = {}
-        if _all_var_init:
-            initialize_variables(shape, dtype)
-        # Apply optimization
-        with target:
-            graph = optimize(graph, shape, dtype, layout)
-
-        # Clear extra params without nodes.
-        _remove_noref_params(params, graph)
-
-        # Precompute prune
-        graph, params = precompute_prune(graph, params)
-        shape, dtype = _update_shape_dtype(shape, dtype, params)
-
-        # Operator Fusion and generation
-        graph = graph_attr.set_shape_inputs(graph, shape)
-        graph = graph.apply("InferShape")
-        graph = graph_attr.set_dtype_inputs(graph, dtype)
-        graph._set_json_attr("target", str(target), "str")
-        if target_host is not None:
-            graph._set_json_attr("target_host", str(target_host), "str")
-
-        return graph, params
-
-
 # You can skip the implementation of this function for this tutorial.
 def tune_tasks(tasks,
                measure_option,
@@ -121,6 +51,7 @@ def tune_tasks(tasks,
                 tuner_obj.load_history(autotvm.record.load_from_file(tmp_log_file))
 
         # do tuning
+        print(tsk.config_space)
         tuner_obj.tune(n_trial=min(n_trial, len(tsk.config_space)),
                        early_stopping=early_stopping,
                        measure_option=measure_option,

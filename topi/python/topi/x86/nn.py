@@ -68,7 +68,7 @@ def schedule_dense(outs):
 
             # Tile
             bnx = 1
-            bny = 4
+            bny = 16
             x, y = output.op.axis
             xo, yo, xi, yi = s[output].tile(x, y, bnx, bny)
 

@@ -5,12 +5,12 @@ import mxnet as mx
 def get_mxnet_symbol(model, align):
     if model == "unet":
         sym = unet.unet(alignment=align)
-        shape = (3, 192, 192)
+        image_shape = (3, 192, 192)
         output_shape = (1, 192, 192)
     if model == "resnet50":
-        sym = resnet.get_symbol(num_classes=100, num_layers=50, image_shape="3, 224, 224")
+        sym = resnet.get_symbol(num_classes=1000, num_layers=50, image_shape="3, 224, 224")
         image_shape = (3, 224, 224)
-        output_shape = (2048,)
+        output_shape = (1000,)
     return sym, image_shape, output_shape
 
 def get_nnvm_sym(sym, image_shape):

@@ -1,6 +1,6 @@
 from tvm import autotvm
-# from tvm.contrib import graph_runtime
-from tvm.contrib.debugger import debug_runtime as graph_runtime
+from tvm.contrib import graph_runtime
+# from tvm.contrib.debugger import debug_runtime as graph_runtime
 import tvm.contrib.util
 import tvm.rpc
 import click
@@ -35,7 +35,7 @@ def run(align,
         autotvm_log,
         tracker_port,
         opt_level):
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     tracker = tvm.rpc.connect_tracker('localhost', 9195)
     remote = tracker.request('skl')
 

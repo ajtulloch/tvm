@@ -61,6 +61,8 @@ def decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, 
     return _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype)
 
 def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
+    # import ipdb
+    # ipdb.set_trace()
     # assert layout == "NCHW", "Only support NCHW"
     # create workload according to raw arguments
     wkl = _conv_NCHWc_arg_to_workload(
@@ -151,10 +153,8 @@ def schedule_conv2d_NCHWc_cpu(cfg, outs):
 
     def _callback(op):
         # schedule conv2d
-        if 'conv2d_NCHWc' in op.tag:
+        if 'spatial_conv2d_output' in op.tag:
             output = op.output(0)
-            data_pad = op.input_tensors[0]
-            kernel = op.input_tensors[1]
             _schedule_spatial_pack_NCHWc(cfg, s, output, outs[0])
 
     traverse_inline(s, outs[0].op, _callback)
@@ -475,5 +475,6 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
             s[kernel_vec].pragma(co, 'debug_skip_region')
         else:
             pass
-
+    # import ipdb; ipdb.set_trace()
+    # print(tvm.lower(s, [data_pad, kernel_vec, last], simple_mode=True))
     return s

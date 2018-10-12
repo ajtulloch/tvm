@@ -218,9 +218,6 @@ inline bool BinaryBroadcastCorrectLayout(const NodeAttrs& attrs,
           "FTVMCompute",                                                       \
           [](const NodeAttrs &attrs, const Array<Tensor> &inputs,              \
              const Array<Tensor> &out_info) {                                  \
-            LOG(ERROR) << "Invoking broadcast_ op ftvmcompute";                \
-            LOG(ERROR) << inputs[0]->shape;                              \
-              LOG(ERROR) << inputs[1]->shape;                            \
             return Array<Tensor>{topi::TOPIOp(inputs[0], inputs[1])};          \
           })                                                                   \
       .add_argument("lhs", "Tensor", "first input")                            \

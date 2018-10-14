@@ -28,14 +28,16 @@ target = 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
 @click.option('--autotvm_log', default="autotvm_unet_tuning.log", type=str)
 @click.option('--tracker_port', default=9195)
 @click.option('--opt_level', default=3)
+@click.option('--verbose', is_flag=True, default=False)
 def run(align,
         num_iter,
         num_cycles,
         model,
         autotvm_log,
         tracker_port,
-        opt_level):
-    logging.basicConfig(level=logging.INFO)
+        opt_level,
+        verbose):
+    logging.basicConfig(level=logging.INFO if not verbose else logging.DEBUG)
     tracker = tvm.rpc.connect_tracker('localhost', 9195)
     remote = tracker.request('skl')
 

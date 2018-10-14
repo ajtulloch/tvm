@@ -370,7 +370,7 @@ def _build_func_common(measure_input, check_gpu=None, cuda_arch=None, build_opti
 
         with build_config(**opts):
             import tvm
-            print(tvm.lower(s, args, simple_mode=True))
+            # print(tvm.lower(s, args, simple_mode=True))
             func = build(s, args, target_host=task.target_host)
     return func, tuple((get_const_tuple(x.shape), x.dtype) for x in args)
 

@@ -30,7 +30,7 @@ def tune_tasks(tasks,
     if os.path.exists(tmp_log_file):
         os.remove(tmp_log_file)
 
-    for i, tsk in enumerate(reversed(tasks)):
+    for i, tsk in enumerate(tasks):
         print(tsk)
         prefix = "[Task %2d/%2d] " % (i+1, len(tasks))
 

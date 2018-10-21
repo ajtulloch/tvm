@@ -17,8 +17,8 @@ def conv2d_NCHWc_winograd_autotvm(s, ic, oc, kernel, pad, stride):
     # ic = ((ic + 16 - 1) // 16) * 16
     # oc = ((oc + 16 - 1) // 16) * 16
     cfg = autotvm.get_config()
-    cfg.define_knob('BNInput', [4, 8, 16]) # TODO, 8, 16
-    cfg.define_knob('BNOutput', [8, 16]) # TODO 8, 16
+    cfg.define_knob('BNInput', [16]) # TODO, 8, 16
+    cfg.define_knob('BNOutput', [16]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
     X = tvm.placeholder(shape=(1, ic // BNInput, s, s, BNInput), dtype="float32", name="X")
@@ -27,7 +27,7 @@ def conv2d_NCHWc_winograd_autotvm(s, ic, oc, kernel, pad, stride):
     Y = unet_conv2d_winograd._decl_winograd_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="float32")
     s = tvm.create_schedule([Y.op])
     s = unet_conv2d_winograd._schedule_winograd_NCHWc(cfg, s, Y, Y)
-    print(tvm.lower(s, [X, W, Y], simple_mode=True))
+    # print(tvm.lower(s, [X, W, Y], simple_mode=True))
     return s, [X, W, Y]
 
 
@@ -100,6 +100,7 @@ local_target = 'llvm -mcpu=core-avx2'
 @click.option('--autotvm_log', default="autotvm_winograd_benchmark.log", type=str)
 @click.option('--layout', type=click.Choice(["NCHWc"]), required=True)
 @click.option('--tracker_port', default=9195)
+@click.option('--timeout', default=50)
 @click.option('--local', is_flag=True, default=False)
 def run(layout,
         autotvm_number,
@@ -107,6 +108,7 @@ def run(layout,
         autotvm_log,
         autotvm_n_trial,
         autotvm_early_stopping,
+        timeout,
         tracker_port,
         local):
     logging.basicConfig(level=logging.DEBUG)
@@ -114,14 +116,14 @@ def run(layout,
         if w.in_filter % 16 != 0 or w.out_filter % 16 != 0:
             continue
         measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(timeout=10),
+            builder=autotvm.LocalBuilder(timeout=timeout),
             runner=autotvm.RPCRunner(
                 'skl', 'localhost', tracker_port,
                 number=autotvm_number,
                 repeat=autotvm_repeat,
-                timeout=10) if not local else
+                timeout=timeout) if not local else
             autotvm.LocalRunner(
-                timeout=10,
+                timeout=timeout,
                 number=autotvm_number,
                 repeat=autotvm_repeat)
         )

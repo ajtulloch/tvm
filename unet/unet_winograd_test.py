@@ -1,15 +1,14 @@
-import unet_winograd
-import unet_winograd_NCHWc
+import unet_conv2d_winograd
 import numpy as np
 import tvm
 import topi
 import topi.testing
 from topi.util import get_const_int, get_const_tuple
 import collections
+from tvm import autotvm
 
 target = tvm.target.create('llvm -mcpu=core-avx2')
 ctx = tvm.context('llvm -mcpu=core-avx2', 0)
-
 
 def nchw_to_NCHWc(x, cc=8):
     (n, c, h, w) = x.shape
@@ -76,15 +75,11 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
         B = topi.nn.conv2d_nhwc(A, dW, stride, padding)
         B_NCHW = topi.nn.conv2d(A_NCHW, W_NCHW, stride, padding, layout='NCHW')
         B_NCHWc = topi.nn.conv2d_NCHWc(A_NCHWc, W_NCHWc, num_filter, (kernel, kernel), stride, padding, layout='NCHW8c', out_layout="NCHW8c")
-        cfg = None
-        B_NCHW_wino = unet_winograd.decl_winograd(
-            cfg, A_NCHW, W_NCHW, stride, padding,
-            layout="NCHW", out_dtype="float32", VP=4, VK=4, packed_output=False)
-        B_NCHWc_wino = unet_winograd_NCHWc.decl_winograd_NCHWc(
-            cfg, A_NCHWc, W_NCHWc, stride, padding, out_dtype="float32", VP=4, VK=4)
+        cfg = autotvm.get_config()
+        B_NCHWc_wino = unet_conv2d_winograd._decl_winograd_NCHWc(
+            cfg, A_NCHWc, W_NCHWc, num_filter, kernel, stride, padding, layout="NCHW8c", out_layout="NCHW8c", out_dtype="float32")
         s = topi.generic.schedule_conv2d_nhwc([B])
         s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
-        s_nchw_wino = unet_winograd.schedule_winograd(cfg, B_NCHW_wino, VP=4, VK=4)
         s_NCHWc_wino = tvm.create_schedule([B_NCHWc_wino.op])
         s_NCHWc = topi.generic.schedule_conv2d_NCHWc_([B_NCHWc])
         # print(tvm.lower(s_nchw_wino, [A_NCHW, W_NCHW, B_NCHW_wino], simple_mode=True))
@@ -112,7 +107,6 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
     func = remote_func(tvm.build(s, [A, W, B], target),name="func")
     func_nchw = remote_func(tvm.build(s_nchw, [A_NCHW, W_NCHW, B_NCHW], target), name="func_nchw")
     # func_tensor = tvm.build(s_tensor, [A, W, B_tensor], device)
-    func_nchw_wino = remote_func(tvm.build(s_nchw_wino, [A_NCHW, W_NCHW, B_NCHW_wino], target), name="func_nchw_tensor_mxn")
     func_NCHWc = remote_func(tvm.build(s_NCHWc, [A_NCHWc, W_NCHWc, B_NCHWc], target), name="func_NCHWc")
     func_NCHWc_wino = remote_func(tvm.build(s_NCHWc_wino, [A_NCHWc, W_NCHWc, B_NCHWc_wino], target), name="func_NCHWc_wino")
 
@@ -133,16 +127,6 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
     print(b_np.flatten()[:5])
 
     np.testing.assert_allclose(NCHWc_to_nchw(b_NCHWc_wino.asnumpy()), b_np.transpose(0, 3, 1, 2), rtol=1e-2)
-
-    func_nchw_wino(a_nchw, w_nchw, b_nchw_wino)
-
-
-    print(np.unravel_index(
-        np.argmax(np.abs(b_nchw_wino.asnumpy() - b_np.transpose(0, 3, 1, 2)), axis=None),
-        b_nchw_wino.shape))
-    print(np.max(np.abs(b_nchw_wino.asnumpy() - b_np.transpose(0, 3, 1, 2)) / (np.abs(b_np.transpose(0, 3, 1, 2))) + 1e-5))
-    print(b_np.flatten()[:5])
-    np.testing.assert_allclose(b_nchw_wino.asnumpy(), b_np.transpose(0, 3, 1, 2), rtol=1e-2)
 
     return 1
 

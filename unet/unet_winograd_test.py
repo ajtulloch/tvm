@@ -39,7 +39,7 @@ def NCHWc_to_nchw(y, cc=8):
 def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
     in_channel = ((in_channel + 7) // 8) * 8
     num_filter = ((num_filter + 7) // 8) * 8
-    print("N: {}, CIn: {}, H/W: {}, COut: {}, KH/KW: {}".format(batch, in_channel, in_size, num_filter, kernel))
+
     in_height = in_width = in_size
     kernel = 3
     stride = 1
@@ -50,7 +50,7 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
     a_shape = get_const_tuple(A.shape)
     w_shape = get_const_tuple(W.shape)
     dtype = A.dtype
-
+    print("N: {}, CIn: {}, H/W: {}, COut: {}, KH/KW: {}".format(batch, in_channel, in_size, num_filter, kernel))
     def get_ref_data():
         np.random.seed(1)
         a_np = np.random.uniform(size=a_shape).astype(dtype)
@@ -118,7 +118,6 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
     func_NCHWc(a_NCHWc, w_NCHWc, b_NCHWc)
     np.testing.assert_allclose(NCHWc_to_nchw(b_NCHWc.asnumpy()), b_np.transpose(0, 3, 1, 2), rtol=1e-5)
     func_NCHWc_wino(a_NCHWc, w_NCHWc, b_NCHWc_wino)
-
     print(b_np.transpose(0, 3, 1, 2).shape)
     print(np.unravel_index(
         np.argmax(np.abs(NCHWc_to_nchw(b_NCHWc_wino.asnumpy()) - b_np.transpose(0, 3, 1, 2)), axis=None),

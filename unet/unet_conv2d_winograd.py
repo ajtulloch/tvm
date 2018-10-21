@@ -1,6 +1,6 @@
 # pylint: disable=invalid-name,unused-variable,no-else-return
 from __future__ import absolute_import as _abs
-
+from __future__ import division
 import numpy as np
 
 import tvm

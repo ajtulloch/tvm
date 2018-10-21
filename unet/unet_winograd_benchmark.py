@@ -14,17 +14,22 @@ import unet_conv2d_winograd
 
 @autotvm.template
 def conv2d_NCHWc_winograd_autotvm(s, ic, oc, kernel, pad, stride):
-    # ic = ((ic + 16 - 1) // 16) * 16
-    # oc = ((oc + 16 - 1) // 16) * 16
+    ic = ((ic + 16 - 1) // 16) * 16
+    oc = ((oc + 16 - 1) // 16) * 16
+    kernel = 3
+    pad = 1
+    stride = 1
     cfg = autotvm.get_config()
     cfg.define_knob('BNInput', [16]) # TODO, 8, 16
     cfg.define_knob('BNOutput', [16]) # TODO 8, 16
+    cfg.define_knob('m', [2, 4, 6]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
+    m = cfg['m'].val
     X = tvm.placeholder(shape=(1, ic // BNInput, s, s, BNInput), dtype="float32", name="X")
     W = tvm.placeholder(shape=(oc // BNOutput, ic // BNInput, kernel, kernel, BNInput, BNOutput), dtype="float32", name="W")
 
-    Y = unet_conv2d_winograd._decl_winograd_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="float32")
+    Y = unet_conv2d_winograd._decl_winograd_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="float32", m=m)
     s = tvm.create_schedule([Y.op])
     s = unet_conv2d_winograd._schedule_winograd_NCHWc(cfg, s, Y, Y)
     # print(tvm.lower(s, [X, W, Y], simple_mode=True))
@@ -116,7 +121,9 @@ def run(layout,
         if w.in_filter % 16 != 0 or w.out_filter % 16 != 0:
             continue
         measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(timeout=timeout),
+            builder=autotvm.LocalBuilder(
+                timeout=timeout,
+                n_parallel=1 if local else None),
             runner=autotvm.RPCRunner(
                 'skl', 'localhost', tracker_port,
                 number=autotvm_number,

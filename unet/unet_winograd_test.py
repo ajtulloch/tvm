@@ -6,6 +6,7 @@ import topi.testing
 from topi.util import get_const_int, get_const_tuple
 import collections
 from tvm import autotvm
+from topi.nn.conv2d import Workload
 
 target = tvm.target.create('llvm -mcpu=core-avx2')
 ctx = tvm.context('llvm -mcpu=core-avx2', 0)
@@ -37,14 +38,11 @@ def NCHWc_to_nchw(y, cc=8):
     return x
 
 def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, padding, dilation=1):
-    in_channel = ((in_channel + 7) // 8) * 8
-    num_filter = ((num_filter + 7) // 8) * 8
-
     in_height = in_width = in_size
-    kernel = 3
-    stride = 1
-    padding = 1
-    dilation = 1
+    assert kernel == 3
+    assert padding == 1
+    assert in_channel % 8 == 0
+    assert num_filter % 8 == 0
     A = tvm.placeholder((batch, in_height, in_width, in_channel), name='A')
     W = tvm.placeholder((kernel, kernel, in_channel, num_filter), name='W')
     a_shape = get_const_tuple(A.shape)
@@ -77,7 +75,7 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
         B_NCHWc = topi.nn.conv2d_NCHWc(A_NCHWc, W_NCHWc, num_filter, (kernel, kernel), stride, padding, layout='NCHW8c', out_layout="NCHW8c")
         cfg = autotvm.get_config()
         B_NCHWc_wino = unet_conv2d_winograd._decl_winograd_NCHWc(
-            cfg, A_NCHWc, W_NCHWc, num_filter, kernel, stride, padding, layout="NCHW8c", out_layout="NCHW8c", out_dtype="float32")
+            cfg, A_NCHWc, W_NCHWc, num_filter, kernel, stride, padding, layout="NCHW8c", out_layout="NCHW8c", out_dtype="float32", m=2)
         s = topi.generic.schedule_conv2d_nhwc([B])
         s_nchw = topi.generic.schedule_conv2d_nchw([B_NCHW])
         s_NCHWc_wino = tvm.create_schedule([B_NCHWc_wino.op])
@@ -132,47 +130,43 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
 
 
 def test_conv2d_nhwc():
-    Workload = collections.namedtuple(
-        'Workload',
-        ['in_dtype', 'out_dtype', 'height', 'width', 'in_filter', 'out_filter',
-         'hkernel', 'wkernel', 'hpad', 'wpad', 'hstride', 'wstride'])
-    WL = [
+    WORKLOADS = [
+        # Workload('float32', 'float32', 224, 224, 3, 64, 7, 7, 3, 3, 2, 2),
+        # Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 0, 0, 1, 1),
+        # Workload('float32', 'float32', 56, 56, 64, 64, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 64, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 64, 128, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 128, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 28, 28, 128, 256, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 256, 3, 3, 1, 1, 1, 1),
+        Workload('float32', 'float32', 14, 14, 256, 512, 3, 3, 1, 1, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 512, 3, 3, 1, 1, 1, 1),
+        # workloads of resnet34_v1 on imagenet, no extra workload required
+        # workloads of resnet50_v1 on imagenet
         Workload('float32', 'float32', 56, 56, 64, 256, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 256, 64, 1, 1, 0, 0, 1, 1),
         Workload('float32', 'float32', 56, 56, 256, 128, 1, 1, 0, 0, 2, 2),
         Workload('float32', 'float32', 28, 28, 128, 512, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 1024, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 7, 7, 512, 2048, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 1024, 2048, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 7, 7, 2048, 512, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 128, 128, 3, 3, 1, 1, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 128, 256, 3, 3, 1, 1, 2, 2),
-        # Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 256, 256, 3, 3, 1, 1, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 256, 512, 3, 3, 1, 1, 2, 2),
-        # Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 2, 2),
-        # Workload('float32', 'float32', 7, 7, 512, 512, 3, 3, 1, 1, 1, 1),
-        # Workload('float32', 'float32', 112, 112, 32, 64, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 7, 7, 512, 1024, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 7, 7, 1024, 1024, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 64, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 56, 56, 128, 128, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 128, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 28, 28, 256, 256, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 256, 512, 1, 1, 0, 0, 1, 1),
-        # Workload('float32', 'float32', 14, 14, 512, 512, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 56, 56, 256, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 28, 28, 512, 128, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 256, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 256, 1024, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 28, 28, 512, 1024, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 14, 14, 1024, 256, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 512, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 512, 2048, 1, 1, 0, 0, 1, 1),
+        Workload('float32', 'float32', 14, 14, 1024, 2048, 1, 1, 0, 0, 2, 2),
+        Workload('float32', 'float32', 7, 7, 2048, 512, 1, 1, 0, 0, 1, 1),
     ]
 
-    def run(workload, name):
-        speedups = [verify_conv2d_NCHWc(1, w.in_filter, w.height, w.out_filter, w.hkernel, w.hstride, w.hpad, 1) for w in workload]
+    for w in WORKLOADS:
+        if w.in_filter % 8 != 0 or w.out_filter % 8 != 0 or w.hkernel != 3 or w.hstride != 1:
+            continue
+        verify_conv2d_NCHWc(1, w.in_filter, w.height, w.out_filter, w.hkernel, w.hstride, w.hpad)
 
-    run(WL, "WL")
 
 
 if __name__ == "__main__":

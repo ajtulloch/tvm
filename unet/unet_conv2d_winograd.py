@@ -266,10 +266,16 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
         s[data_pad].compute_inline()
     if cfg['data_pad_compute_location'].val == 1:
         s[data_pad].compute_at(s[input_tile], cii)
+        (_, _, _, _, dpcii) = s[data_pad].op.axis
+        s[data_pad].vectorize(dpcii)
     if cfg['data_pad_compute_location'].val == 2:
         s[data_pad].compute_at(s[input_tile], oh_m)
+        (_, _, _, _, dpcii) = s[data_pad].op.axis
+        s[data_pad].vectorize(dpcii)
     if cfg['data_pad_compute_location'].val == 3:
         s[data_pad].compute_at(s[input_tile], ow_m)
+        (_, _, _, _, dpcii) = s[data_pad].op.axis
+        s[data_pad].vectorize(dpcii)
 
     ############################################################
 

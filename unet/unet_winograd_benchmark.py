@@ -118,7 +118,7 @@ def run(layout,
         local):
     logging.basicConfig(level=logging.DEBUG)
     for i, w in enumerate(WORKLOADS):
-        if w.in_filter % 16 != 0 or w.out_filter % 16 != 0:
+        if w.in_filter % 16 != 0 or w.out_filter % 16 != 0 or w.hkernel != 3 or w.hpad != 1 or w.hstride != 1:
             continue
         measure_option=autotvm.measure_option(
             builder=autotvm.LocalBuilder(

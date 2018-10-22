@@ -20,9 +20,9 @@ def conv2d_NCHWc_winograd_autotvm(s, ic, oc, kernel, pad, stride):
     pad = 1
     stride = 1
     cfg = autotvm.get_config()
-    cfg.define_knob('BNInput', [16]) # TODO, 8, 16
-    cfg.define_knob('BNOutput', [16]) # TODO 8, 16
-    cfg.define_knob('m', [4]) # TODO 8, 16
+    cfg.define_knob('BNInput', [8, 16]) # TODO, 8, 16
+    cfg.define_knob('BNOutput', [8, 16]) # TODO 8, 16
+    cfg.define_knob('m', [4, 6]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
     m = cfg['m'].val

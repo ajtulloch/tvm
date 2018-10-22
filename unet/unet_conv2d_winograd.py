@@ -152,25 +152,25 @@ def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, pad
                        policy='candidate', candidate=[
                            [n, coo, cii, oh_m, ow_m, eps, ciii, nu, vc],
                            # [n, coo, cii, oh_m, ow_m, ciii, nu, eps, vc],
-                           [n, coo, cii, oh_m, ow_m, nu, eps, ciii, vc],
+                           # [n, coo, cii, oh_m, ow_m, nu, eps, ciii, vc],
                            # [n, coo, oh_m, ow_m, nu, eps, cii, ciii, vc],
                        ])
 
     cfg.define_reorder("reorder_V",
                        [n, cii, oh_m, ow_m, eps, nu, ciii, r_eps, r_nu],
                        policy='candidate', candidate=[
-                           [n, cii, oh_m, ow_m, eps, nu, r_eps, r_nu, ciii],
                            [n, cii, oh_m, ow_m, eps, r_eps, r_nu, nu, ciii],
-                           [n, cii, oh_m, ow_m, r_eps, r_nu, eps, nu, ciii],
+                           # [n, cii, oh_m, ow_m, eps, nu, r_eps, r_nu, ciii],
+                           # [n, cii, oh_m, ow_m, r_eps, r_nu, eps, nu, ciii],
                            # [n, cii, oh_m, ow_m, r_eps, r_nu, eps, nu, ciii],
                        ])
 
     cfg.define_reorder("reorder_Y",
                        [n, coo, oh_m, ow_m, vh, vw, vc, r_eps, r_nu],
                        policy='candidate', candidate=[
-                           [n, coo, oh_m, ow_m, vh, vw, r_eps, r_nu, vc],
                            [n, coo, oh_m, ow_m, vh, r_eps, r_nu, vw, vc],
-                           [n, coo, oh_m, ow_m, r_eps, r_nu, vh, vw, vc],
+                           # [n, coo, oh_m, ow_m, vh, vw, r_eps, r_nu, vc],
+                           # [n, coo, oh_m, ow_m, r_eps, r_nu, vh, vw, vc],
                            # [n, coo, oh_m, ow_m, r_eps, r_nu, vh, vw, vc],
                        ])
 
@@ -263,7 +263,8 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     # Vectorize the input tile
     s[input_tile].vectorize(ciii)
 
-    cfg.define_knob('data_pad_compute_location', [0, 1, 2, 3])
+    # cfg.define_knob('data_pad_compute_location', [0, 1, 2, 3])
+    cfg.define_knob('data_pad_compute_location', [3])
     if cfg['data_pad_compute_location'].val == 0:
         s[data_pad].compute_inline()
     if cfg['data_pad_compute_location'].val == 1:
@@ -291,13 +292,14 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     n, cii, oh_m, ow_m, eps, nu, ciii = s[V].op.axis
     r_eps, r_nu = s[V].op.reduce_axis
     cfg["reorder_V"].apply(s, V, [n, cii, oh_m, ow_m, eps, nu, ciii, r_eps, r_nu])
-    # s[V].reorder(n, cii, oh, ow, eps, nu, r_eps, r_nu, ciii)
-    for axis in [r_eps, r_nu, eps, nu]:
-        if UNROLL:
-            s[V].unroll(axis)
+
+    cfg.define_annotate("reduce_V", [r_eps, r_nu, eps, nu],
+                        policy='try_unroll')
+    cfg['reduce_V'].apply(s, V, [r_eps, r_nu, eps, nu], cfg=cfg)
     s[V].vectorize(ciii)
 
-    cfg.define_knob('input_tile_compute_location', [0, 1, 2, 3])
+    cfg.define_knob('input_tile_compute_location', [3])
+    # cfg.define_knob('input_tile_compute_location', [0, 1, 2, 3])
     if cfg['input_tile_compute_location'].val == 1:
         s[input_tile].compute_at(s[V], cii)
     if cfg['input_tile_compute_location'].val == 2:
@@ -311,9 +313,14 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     n, coo, oh_m, ow_m, eps, nu, vc = s[M].op.axis
     cii, ciii = s[M].op.reduce_axis
     s[M].vectorize(vc)
-
     cfg["reorder_M"].apply(s, M, [n, coo, oh_m, ow_m, eps, nu, vc, cii, ciii])
-    cfg.define_knob('V_compute_location', [0, 1, 2, 3])
+
+    cfg.define_annotate("reduce_M", [eps, nu],
+                        policy='try_unroll')
+    cfg['reduce_M'].apply(s, M, [eps, nu], cfg=cfg)
+
+    # cfg.define_knob('V_compute_location', [0, 1, 2, 3])
+    cfg.define_knob('V_compute_location', [0])
     if cfg['V_compute_location'].val == 1:
         s[V].compute_at(s[M], coo)
     if cfg['V_compute_location'].val == 2:
@@ -328,13 +335,15 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     s[A].compute_inline()
     n, coo, oh_m, ow_m, vh, vw, vc = s[Y].op.axis
     r_eps, r_nu = s[Y].op.reduce_axis
-    cfg['reorder_Y'].apply(s, Y, [n, coo, oh_m, ow_m, vh, vw, vc, r_eps, r_nu])
-    for axis in [r_eps, r_nu, vh, vw]:
-        if UNROLL:
-            s[Y].unroll(axis)
-    s[Y].vectorize(vc)
 
-    cfg.define_knob('M_compute_location', [0, 1, 2, 3])
+    cfg['reorder_Y'].apply(s, Y, [n, coo, oh_m, ow_m, vh, vw, vc, r_eps, r_nu])
+
+    cfg.define_annotate("reduce_Y", [r_eps, r_nu, vh, vw],
+                        policy='try_unroll')
+    cfg['reduce_Y'].apply(s, Y, [r_eps, r_nu, vh, vw], cfg=cfg)
+
+    # cfg.define_knob('M_compute_location', [0, 1, 2, 3])
+    cfg.define_knob('M_compute_location', [2])
     if cfg['M_compute_location'].val == 1:
         s[M].compute_at(s[Y], coo)
     if cfg['M_compute_location'].val == 2:
@@ -348,7 +357,8 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     n, coo, oh, ow, vc = s[last].op.axis
     s[last].vectorize(vc)
     s[output].vectorize(vc)
-    cfg.define_knob('Y_compute_location', [0, 1, 2])
+    # cfg.define_knob('Y_compute_location', [0, 1, 2])
+    cfg.define_knob('Y_compute_location', [1])
     if cfg['Y_compute_location'].val == 1:
         s[Y].compute_at(s[output], coo)
     if cfg['Y_compute_location'].val == 2:

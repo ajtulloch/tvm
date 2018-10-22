@@ -152,23 +152,25 @@ def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, pad
                        policy='candidate', candidate=[
                            [n, coo, cii, oh_m, ow_m, eps, ciii, nu, vc],
                            # [n, coo, cii, oh_m, ow_m, ciii, nu, eps, vc],
-                           # [n, coo, cii, oh_m, ow_m, nu, eps, ciii, vc],
+                           [n, coo, cii, oh_m, ow_m, nu, eps, ciii, vc],
                            # [n, coo, oh_m, ow_m, nu, eps, cii, ciii, vc],
                        ])
 
     cfg.define_reorder("reorder_V",
                        [n, cii, oh_m, ow_m, eps, nu, ciii, r_eps, r_nu],
                        policy='candidate', candidate=[
-                           # [n, cii, oh_m, ow_m, eps, nu, r_eps, r_nu, ciii],
+                           [n, cii, oh_m, ow_m, eps, nu, r_eps, r_nu, ciii],
                            [n, cii, oh_m, ow_m, eps, r_eps, r_nu, nu, ciii],
+                           [n, cii, oh_m, ow_m, r_eps, r_nu, eps, nu, ciii],
                            # [n, cii, oh_m, ow_m, r_eps, r_nu, eps, nu, ciii],
                        ])
 
     cfg.define_reorder("reorder_Y",
                        [n, coo, oh_m, ow_m, vh, vw, vc, r_eps, r_nu],
                        policy='candidate', candidate=[
-                           # [n, coo, oh_m, ow_m, vh, vw, r_eps, r_nu, vc],
+                           [n, coo, oh_m, ow_m, vh, vw, r_eps, r_nu, vc],
                            [n, coo, oh_m, ow_m, vh, r_eps, r_nu, vw, vc],
+                           [n, coo, oh_m, ow_m, r_eps, r_nu, vh, vw, vc],
                            # [n, coo, oh_m, ow_m, r_eps, r_nu, vh, vw, vc],
                        ])
 

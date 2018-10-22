@@ -1,5 +1,5 @@
 import unet_conv2d_winograd
-import unet_conv2d
+import unet_conv2d_direct
 import numpy as np
 import tvm
 import topi
@@ -75,7 +75,7 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
         B_NCHW = topi.nn.conv2d(A_NCHW, W_NCHW, stride, padding, layout='NCHW')
         B_NCHWc = topi.nn.conv2d_NCHWc(A_NCHWc, W_NCHWc, num_filter, (kernel, kernel), stride, padding, layout='NCHW8c', out_layout="NCHW8c")
         cfg = autotvm.get_config()
-        B_NCHWc_custom = unet_conv2d._decl_spatial_pack_NCHWc(cfg, A_NCHWc, W_NCHWc, num_filter, (kernel, kernel), stride, padding, layout='NCHW8c', out_layout="NCHW8c", out_dtype="float32")
+        B_NCHWc_custom = unet_conv2d_direct._decl_spatial_pack_NCHWc(cfg, A_NCHWc, W_NCHWc, num_filter, (kernel, kernel), stride, padding, layout='NCHW8c', out_layout="NCHW8c", out_dtype="float32")
 
         B_NCHWc_wino = unet_conv2d_winograd._decl_winograd_NCHWc(
             cfg, A_NCHWc, W_NCHWc, num_filter, kernel, stride, padding, layout="NCHW8c", out_layout="NCHW8c", out_dtype="float32", m=2)
@@ -85,9 +85,7 @@ def verify_conv2d_NCHWc(batch, in_channel, in_size, num_filter, kernel, stride, 
         s_NCHWc_wino = tvm.create_schedule([B_NCHWc_wino.op])
         s_NCHWc = topi.generic.schedule_conv2d_NCHWc_([B_NCHWc])
         s_NCHWc_custom = tvm.create_schedule([B_NCHWc_custom.op])
-        print(tvm.lower(s_NCHWc_custom, [A_NCHWc, W_NCHWc, B_NCHWc_custom], simple_mode=True))
-        import sys
-        sys.exit(1)
+        # print(tvm.lower(s_NCHWc_custom, [A_NCHWc, W_NCHWc, B_NCHWc_custom], simple_mode=True))
         # print(tvm.lower(s_NCHWc_wino, [A_NCHWc, W_NCHWc, B_NCHWc_wino], simple_mode=True))
 
     a = tvm.nd.array(a_np, ctx)

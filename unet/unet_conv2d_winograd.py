@@ -362,7 +362,7 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     OW = get_const_int(ow.dom.extent)
     mh = get_const_int(vh.dom.extent)
     mw = get_const_int(vw.dom.extent)
-    cfg.define_knob('output_tile', [0, 1])
+    cfg.define_knob('output_tile', [1])
     cfg.define_annotate('reduce_output', [cfg.axis(mh), cfg.axis(mw)], policy="try_unroll")
     output_tile = False
     if OH % mh == 0 and OW % mw == 0 and cfg['output_tile'].val == 1:

@@ -263,8 +263,7 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     # Vectorize the input tile
     s[input_tile].vectorize(ciii)
 
-    # cfg.define_knob('data_pad_compute_location', [0, 1, 2, 3])
-    cfg.define_knob('data_pad_compute_location', [3])
+    cfg.define_knob('data_pad_compute_location', [0, 1, 2, 3])
     if cfg['data_pad_compute_location'].val == 0:
         s[data_pad].compute_inline()
     if cfg['data_pad_compute_location'].val == 1:
@@ -291,15 +290,16 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     # transform image
     n, cii, oh_m, ow_m, eps, nu, ciii = s[V].op.axis
     r_eps, r_nu = s[V].op.reduce_axis
+
+    s[V].vectorize(ciii)
     cfg["reorder_V"].apply(s, V, [n, cii, oh_m, ow_m, eps, nu, ciii, r_eps, r_nu])
 
     cfg.define_annotate("reduce_V", [r_eps, r_nu, eps, nu],
-                        policy='try_unroll')
+                        policy='unroll')
     cfg['reduce_V'].apply(s, V, [r_eps, r_nu, eps, nu], cfg=cfg)
-    s[V].vectorize(ciii)
 
-    cfg.define_knob('input_tile_compute_location', [3])
-    # cfg.define_knob('input_tile_compute_location', [0, 1, 2, 3])
+
+    cfg.define_knob('input_tile_compute_location', [0, 1, 2, 3])
     if cfg['input_tile_compute_location'].val == 1:
         s[input_tile].compute_at(s[V], cii)
     if cfg['input_tile_compute_location'].val == 2:
@@ -313,14 +313,14 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     n, coo, oh_m, ow_m, eps, nu, vc = s[M].op.axis
     cii, ciii = s[M].op.reduce_axis
     s[M].vectorize(vc)
+
     cfg["reorder_M"].apply(s, M, [n, coo, oh_m, ow_m, eps, nu, vc, cii, ciii])
 
     cfg.define_annotate("reduce_M", [eps, nu],
                         policy='try_unroll')
     cfg['reduce_M'].apply(s, M, [eps, nu], cfg=cfg)
 
-    # cfg.define_knob('V_compute_location', [0, 1, 2, 3])
-    cfg.define_knob('V_compute_location', [0])
+    cfg.define_knob('V_compute_location', [0, 1, 2, 3])
     if cfg['V_compute_location'].val == 1:
         s[V].compute_at(s[M], coo)
     if cfg['V_compute_location'].val == 2:
@@ -335,30 +335,43 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     s[A].compute_inline()
     n, coo, oh_m, ow_m, vh, vw, vc = s[Y].op.axis
     r_eps, r_nu = s[Y].op.reduce_axis
+    s[Y].vectorize(vc)
 
     cfg['reorder_Y'].apply(s, Y, [n, coo, oh_m, ow_m, vh, vw, vc, r_eps, r_nu])
 
     cfg.define_annotate("reduce_Y", [r_eps, r_nu, vh, vw],
-                        policy='try_unroll')
+                        policy='unroll')
     cfg['reduce_Y'].apply(s, Y, [r_eps, r_nu, vh, vw], cfg=cfg)
 
-    # cfg.define_knob('M_compute_location', [0, 1, 2, 3])
-    cfg.define_knob('M_compute_location', [2])
+    cfg.define_knob('M_compute_location', [0, 1, 2, 3])
     if cfg['M_compute_location'].val == 1:
         s[M].compute_at(s[Y], coo)
     if cfg['M_compute_location'].val == 2:
         s[M].compute_at(s[Y], oh_m)
     if cfg['M_compute_location'].val == 3:
         s[M].compute_at(s[Y], ow_m)
+
     ############################################################
 
     ############################################################
     # output
-    n, coo, oh, ow, vc = s[last].op.axis
-    s[last].vectorize(vc)
+    n, coo, oh, ow, vc = s[output].op.axis
     s[output].vectorize(vc)
-    # cfg.define_knob('Y_compute_location', [0, 1, 2])
-    cfg.define_knob('Y_compute_location', [1])
+
+    OH = get_const_int(oh.dom.extent)
+    OW = get_const_int(ow.dom.extent)
+    mh = get_const_int(vh.dom.extent)
+    mw = get_const_int(vw.dom.extent)
+    cfg.define_knob('output_tile', [0, 1])
+    cfg.define_annotate('reduce_output', [cfg.axis(mh), cfg.axis(mw)], policy="try_unroll")
+    output_tile = False
+    if OH % mh == 0 and OW % mw == 0 and cfg['output_tile'].val == 1:
+        # We can tile in OH
+        output_tile = True
+        oh, ow, ohi, owi = s[output].tile(oh, ow, mh, mw)
+        cfg["reduce_output"].apply(s, output, [ohi, owi], cfg=cfg)
+
+    cfg.define_knob('Y_compute_location', [0, 1, 2, 3])
     if cfg['Y_compute_location'].val == 1:
         s[Y].compute_at(s[output], coo)
     if cfg['Y_compute_location'].val == 2:

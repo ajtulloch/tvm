@@ -131,12 +131,17 @@ def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, pad
     OW_M = div_round_up(OW, m)
     # Layouts:
 
+    # input            = (N, CII, IH, IW, CIII)
+    # -> transpose
+    ############################################################
     # input_tile_shape = (N, CII, OH // m, OH // m, alpha, alpha, CIII)
-    # U_shape = (COO, CII, CIII, alpha, alpha, COOO)
-    # V_shape = (N, CII, OH // m, OW // m, alpha, alpha, CIII)
-    # M_shape = (N, COO, OH // m, OW // m, alpha, alpha, COOO)
-    # Y_shape = (N, COO, OH // m, OW // m, m, m, COOO)
-    # O_shape = (N, COO, OH, OW, COOO)
+    # U_shape          = (COO, CII, CIII, alpha, alpha, COOO)
+    # V_shape          = (N, CII, OH // m, OW // m, alpha, alpha, CIII)
+    # M_shape          = (N, COO, OH // m, OW // m, alpha, alpha, COOO)
+    # Y_shape          = (N, COO, OH // m, OW // m, m, m, COOO)
+    ############################################################
+    # -> transpose
+    # O_shape          = (N, COO, OH, OW, COOO)
 
     n, coo, oh, ow, oh_m, ow_m, vc = \
         cfg.axis(N), cfg.axis(COO), cfg.axis(OH), cfg.axis(OW), \

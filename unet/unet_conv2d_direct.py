@@ -78,6 +78,15 @@ def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride,
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
 
+    # input            = (N, CII, IH, IW, CIII)
+    # -> transpose
+    ############################################################
+    # input_tile_shape = (N, CII, OH // VH, OH // VH, VH + KH, VW + KW, CIII)
+    # oshape           = (N, COO, OH // VH, OW // VH, VH, VW, COOO)
+    ############################################################
+    # -> transpose
+    # O_shape          = (N, COO, OH, OW, COOO)
+
     dvshape = (N, CII, OH // VH, OW // VW, VH*HSTR + KH-1, VW*WSTR + KW-1, CIII)
     ovshape = (N, COO, OH // VH, OW // VW, VH, VW, VC)
     oshape = (N, COO, OH, OW, VC)

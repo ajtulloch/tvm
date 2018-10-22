@@ -57,9 +57,13 @@ def decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype):
 def decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
     return unet_conv2d_direct._decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype)
 
+@conv2d_NCHWc_cpu.register(['winograd'])
+def decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
+    return unet_conv2d_winograd._decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype, m=4)
+
 
 @autotvm.register_topi_schedule(
-    schedule_conv2d_NCHWc_, 'cpu', ['direct'], override=True)
+    schedule_conv2d_NCHWc_, 'cpu', ['direct', 'winograd'], override=True)
 def schedule_conv2d_NCHWc_cpu(cfg, outs):
     s = tvm.create_schedule([x.op for x in outs])
 
@@ -68,9 +72,26 @@ def schedule_conv2d_NCHWc_cpu(cfg, outs):
         if 'spatial_conv2d_output' in op.tag:
             output = op.output(0)
             unet_conv2d_direct._schedule_spatial_pack_NCHWc(cfg, s, output, outs[0])
+        if 'winograd_conv2d_output' in op.tag:
+            output = op.output(0)
+            unet_conv2d_winograd._schedule_winograd_NCHWc(cfg, s, output, outs[0])
 
     traverse_inline(s, outs[0].op, _callback)
     return s
+
+# @autotvm.register_topi_schedule(schedule_conv2d_winograd_without_weight_transform,
+#                                 'cpu', ['winograd'])
+# def schedule_conv2d_winograd_without_weight_transform_(cfg, outs):
+#     """TOPI schedule callback"""
+#     s = tvm.create_schedule([x.op for x in outs])
+
+#     def _callback(op):
+#         if 'winograd_conv2d_output' in op.tag:
+#             output = op.output(0)
+#             _schedule_winograd(cfg, s, output, outs[0])
+
+#     traverse_inline(s, outs[0].op, _callback)
+#     return s
 
 
 @autotvm.register_topi_schedule(

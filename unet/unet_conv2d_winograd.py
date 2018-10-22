@@ -11,6 +11,7 @@ from topi.util import traverse_inline, get_const_tuple, const_matrix
 from topi.nn import pad, conv2d, conv2d_NCHWc, conv2d_alter_layout
 from topi.nn.util import get_const_int, get_pad_tuple
 import topi.nn
+import unet_conv2d_direct
 
 import os
 UNROLL = int(os.environ.get('UNROLL', '1'))
@@ -97,11 +98,9 @@ def get_transform_matrices(m):
 
 def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype, m):
     # create workload according to raw arguments
-    # wkl = _conv_NCHWc_arg_to_workload(
-    #     data, kernel, num_filter, kernel_size,
-    #     stride, padding, layout, out_layout, out_dtype)
-
-    wkl = [] #None
+    wkl = unet_conv2d_direct._conv_NCHWc_arg_to_workload(
+        data, kernel, num_filter, kernel_size,
+        stride, padding, layout, out_layout, out_dtype)
 
     out_dtype = out_dtype or data.dtype
     N, CII, IH, IW, CIII = get_const_tuple(data.shape)

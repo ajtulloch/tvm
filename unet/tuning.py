@@ -63,6 +63,16 @@ def tune_tasks(tasks,
     autotvm.record.pick_best(tmp_log_file, log_filename)
     os.remove(tmp_log_file)
 
+def apply_winograd(tasks):
+    def f(task):
+        try:
+            return autotvm.task.create(task.name, task.args,
+                                       task.target, task.target_host, 'winograd')
+        except AssertionError:
+            logging.exception("Failed to construct Winograd variant task for task: %s", task)
+            return None
+    ts = [f(task) for task in tasks]
+    return [t for t in ts if t is not None]
 
 @click.command()
 @click.option('--align', default=8)
@@ -73,6 +83,7 @@ def tune_tasks(tasks,
 @click.option('--autotvm_early_stopping', default=100)
 @click.option('--autotvm_log', default="autotvm_unet_tuning.log", type=str)
 @click.option('--tracker_port', default=9195)
+@click.option('--winograd', default=False, is_flag=True)
 @click.option('--opt_level', default=3)
 def run(align,
         model,
@@ -82,6 +93,7 @@ def run(align,
         autotvm_n_trial,
         autotvm_early_stopping,
         tracker_port,
+        winograd,
         opt_level):
     logging.basicConfig(level=logging.DEBUG)
     sym, image_shape, output_shape = models.get_mxnet_symbol(model, align)
@@ -109,7 +121,10 @@ def run(align,
                 nnvm.sym.contrib.conv2d_NCHWc,
             ]
         )
-    print(tasks)
+    if winograd:
+        tasks = apply_winograd(tasks)
+    for i, task in enumerate(tasks):
+        logging.info("Task %s: %s", i, task)
     # import ipdb; ipdb.set_trace()
     tune_tasks(tasks,
                measure_option=autotvm.measure_option(

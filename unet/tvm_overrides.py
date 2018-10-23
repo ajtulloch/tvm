@@ -6,45 +6,6 @@ import nnvm.top.registry
 from topi import generic, tag
 from tvm import autotvm
 
-@conv2d_alter_layout.register("cpu", override=True)
-def _alter_conv2d_layout(attrs, inputs, tinfos):
-    import nnvm.symbol as sym
-    copy_inputs = [s for s in inputs]
-    new_attrs = {k : attrs[k] for k in attrs.keys()}
-    # only optimize for NCHW, groups=1 conv
-    if attrs['layout'] != 'NCHW' or attrs.get_int("groups") != 1:
-        return None
-
-    data = tinfos[0]
-    kernel = tinfos[1]
-
-    import ast
-    padding = ast.literal_eval(attrs['padding'])
-    stride = ast.literal_eval(attrs['strides'])
-
-    wkl = _get_workload(data, kernel, stride, padding, data.dtype)
-    # cfg = autotvm.DispatchContext.current.query(tvm.target.current_target(), wkl)
-
-    # if cfg.is_fallback:  # if is fallback, clear query cache and return None
-    #     autotvm.task.clear_fallback_cache(tvm.target.current_target(), workload)
-    #     return None
-
-    # if cfg.template_key == 'direct' and 'tile_co' in cfg:  # packing weight tensor
-    #     new_attrs['kernel_layout'] = 'OIHW%do' % (cfg['tile_co'].size[-1])
-    #     return sym.conv2d(*copy_inputs, **new_attrs)
-    # print(wkl)
-    if wkl.in_filter % 16 == 0 and wkl.out_filter % 16 == 0:
-        print("Altering layout to NCHW16c")
-        new_attrs['layout'] = 'NCHW16c'
-        new_attrs['out_layout'] = 'NCHW16c'
-        new_attrs['kernel_layout'] = 'OIHW16i16o'
-        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
-    if wkl.in_filter % 3 == 0 and wkl.out_filter % 16 == 0:
-        new_attrs['layout'] = 'NCHW3c'
-        new_attrs['out_layout'] = 'NCHW16c'
-        new_attrs['kernel_layout'] = 'OIHW3i16o'
-        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
-
 # # data = sym.max_pool2d(data=data, pool_size=(2, 2), strides=(2, 2), layout=layout)
 @nnvm.top.registry.register_alter_op_layout("max_pool2d")
 def alter_max_pool2d_layout(attrs, inputs, tinfos):
@@ -68,7 +29,7 @@ def _upsampling_alter_layout(attrs, inputs, tinfos):
     import nnvm.symbol as sym
     copy_inputs = [s for s in inputs]
     new_attrs = {k : attrs[k] for k in attrs.keys()}
-    print(new_attrs)
+    # print(new_attrs)
     if attrs['layout'] != 'NCHW':
         return None
 

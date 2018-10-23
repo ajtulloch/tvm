@@ -81,7 +81,7 @@ class LLVMModuleNode final : public runtime::ModuleNode {
       // LOG(ERROR) << "Verifying module";
       for (const auto &f : m->functions()) {
         // LOG(INFO) << "Verifying function: " << std::string(f.getName());
-        llvm::verifyFunction(f, &llvm::errs());
+        CHECK(!llvm::verifyFunction(f, &llvm::errs()));
       }
       llvm::verifyModule(*m, &llvm::errs());
       // LOG(ERROR)<< "Running passes to save .o file";

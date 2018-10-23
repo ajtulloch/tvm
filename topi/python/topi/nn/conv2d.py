@@ -397,6 +397,59 @@ def conv2d_winograd_weight_transform(kernel, tile_size):
                                G[eps][r_kh] * G[nu][r_kw],
                                axis=[r_kh, r_kw]), name='transform_weight')
 
+def conv2d_NCHWc_winograd_weight_transform(kernel, tile_size, kernel_layout):
+    """Weight transformation for winograd
+
+    Parameters
+    ----------
+    kernel: Tensor
+        The raw kernel tensor with layout "NCHW". Only 3x3 kernel is supported for now
+    tile_size: int
+        Tile size of winograd transform. e.g. 2 for F(2x2, 3x3) and 4 for F(4x4, 3x3)
+
+    Returns
+    -------
+    output : tvm.Tensor
+        4-D with shape [alpha, alpha, CO, CI]
+    """
+    K = 3
+
+    assert tile_size in (2, 4)
+    COO, CII, KH, KW, CIII, VC = get_const_tuple(kernel.shape)
+    shape = get_const_tuple(kernel.shape)
+    assert KH == 3
+    assert KW == 3
+
+    alpha = tile_size + KH - 1
+
+    if tile_size == 2:
+        G_data = np.array([
+            [1, 0, 0],
+            [1.0/2, 1.0/2, 1.0/2],
+            [1.0/2, -1.0/2, 1.0/2],
+            [0, 0, 1],
+        ], dtype=kernel.dtype)
+    elif tile_size == 4:
+        G_data = np.array([
+            [1 / 4.0, 0, 0],
+            [-1 / 6.0, -1 / 6.0, -1 / 6.0],
+            [-1 / 6.0, 1 / 6.0, -1 / 6.0],
+            [1 / 24.0, 1 / 12.0, 1 / 6.0],
+            [1 / 24.0, -1 / 12.0, 1 / 6.0],
+            [0, 0, 1]
+        ], dtype=kernel.dtype)
+    else:
+        raise ValueError("Unsupoorted tile size:" + tile_size)
+
+    G = const_matrix(G_data, 'G')
+    r_kh = tvm.reduce_axis((0, K), name='r_kh')
+    r_kw = tvm.reduce_axis((0, K), name='r_kw')
+    return tvm.compute((COO, CII, CIII, alpha, alpha, VC),
+                    lambda coo, cii, ciii, eps, nu, vc:
+                    tvm.sum(kernel[coo][cii][r_kh][r_kw][ciii][vc].astype("float32") *
+                            G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]),
+                    name='U')
+
 
 @tvm.target.generic_func
 def conv2d_winograd_without_weight_transform(input, filter, strides, padding,
@@ -410,6 +463,32 @@ def conv2d_winograd_without_weight_transform(input, filter, strides, padding,
         4-D with shape [batch, in_height, in_width, in_channel]
     filter : tvm.Tensor
         4-D with shape [filter_height, filter_width, in_channel, num_filter]
+    strides : int or a list/tuple of two ints
+        Stride size, or [stride_height, stride_width]
+    padding : int or str
+        Padding size, or ['VALID', 'SAME']
+    tile_size: int
+        Tile size of winograd transform. e.g. 2 for F(2x2, 3x3) and 4 for F(4x4, 3x3)
+
+    Returns
+    -------
+    output : tvm.Tensor
+        4-D with shape [batch, out_height, out_width, out_channel]
+    """
+    raise ValueError("missing register for topi.nn.conv2d_winograd_without_weight_transform")
+
+@tvm.target.generic_func
+def conv2d_NCHWc_winograd_without_weight_transform(input, filter, strides, padding,
+                                                   layout, out_dtype, tile_size):
+    """Compute convolution in winograd algorithm. The filter is supposed to be transformed
+    in advance.
+
+    Parameters
+    ----------
+    input : tvm.Tensor
+        5-D with shape [batch, in_channel_chunk, in_height, in_width, in_channel_block]
+    filter : tvm.Tensor
+        6-D with shape [out_chafilter_height, filter_width, in_channel, num_filter]
     strides : int or a list/tuple of two ints
         Stride size, or [stride_height, stride_width]
     padding : int or str

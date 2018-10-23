@@ -6,14 +6,16 @@ import numpy as np
 
 import tvm
 from tvm import autotvm
-
-from topi.generic import schedule_conv2d_nchw, schedule_conv2d_NCHWc_
+import nnvm.symbol as sym
+from topi.generic import schedule_conv2d_nchw, schedule_conv2d_NCHWc_, schedule_conv2d_NCHWc_winograd_without_weight_transform
 from topi.util import traverse_inline, get_const_tuple, const_matrix
-from topi.nn import pad, conv2d, conv2d_NCHWc, conv2d_alter_layout
+from topi.nn import pad, conv2d, conv2d_NCHWc, conv2d_alter_layout, conv2d_NCHWc_winograd_without_weight_transform
+from topi.nn.conv2d import _get_workload
 from topi.nn.util import get_const_int, get_pad_tuple
 import topi.nn
+import logging
 
-import unet_conv2d_direct
+import unet_conv2d_NCHWc_direct
 import unet_conv2d_winograd
 
 def _conv_arg_to_workload(data, kernel, strides, padding, layout, out_dtype):
@@ -26,6 +28,95 @@ def _conv_arg_to_workload(data, kernel, strides, padding, layout, out_dtype):
                                      dtype=kernel.dtype)
     return ('conv2d', ) + autotvm.task.args_to_workload(
         [data, raw_kernel, strides, padding, layout, out_dtype])
+
+def _conv_inferred_winograd_NCHWc_arg_to_workload(data, kernel, strides, padding, layout, out_dtype):
+    N, CI, IH, IW = get_const_tuple(data.shape)
+    assert CI % 16 == 0
+    data_NCHWc = tvm.placeholder((N, CI // 16, IH, IW, 16), dtype="float32")
+    CO, CI, KH, KW = get_const_tuple(kernel.shape)
+    assert CO % 16 == 0
+    assert CI % 16 == 0
+    kernel_NCHWc = tvm.placeholder((CO // 16, CI // 16, KH, KW, 16, 16), dtype="float32")
+    return unet_conv2d_NCHWc_direct._conv_NCHWc_arg_to_workload(data_NCHWc, kernel_NCHWc, CO, (KH, KW), strides, padding, layout="NCHW16c", out_layout="NCHW16c", out_dtype="float32")
+
+def winograd_alter_layout_transform(attrs, inputs, tinfos):
+    copy_inputs = [s for s in inputs]
+    new_attrs = {k: attrs[k] for k in attrs.keys()}
+
+    data = tinfos[0]
+    kernel = tinfos[1]
+
+    strides = attrs.get_int_tuple("strides")
+    padding = attrs.get_int_tuple("padding")
+    groups = attrs.get_int('groups')
+    layout = attrs["layout"]
+    out_dtype = attrs["out_dtype"]
+    out_dtype = tinfos[0].dtype if out_dtype == "same" else out_dtype
+    workload = _conv_inferred_winograd_NCHWc_arg_to_workload(tinfos[0], tinfos[1], strides, padding,
+                                                             layout, out_dtype)
+    cfg = autotvm.DispatchContext.current.query(
+        tvm.target.current_target(), workload)
+    if cfg.is_fallback:  # if is fallback, clear query cache and return None
+        autotvm.task.clear_fallback_cache(
+            tvm.target.current_target(), workload)
+        raise RuntimeError("Unknown configuration for Winograd in AutoTVM, need a fallback")
+
+    if cfg.template_key != 'winograd':
+        raise RuntimeError("Winograd is not the optimal configuration for AutoTVM")
+    tile_size = 4
+    transformed_weight = sym.contrib.conv2d_NCHWc_winograd_weight_transform(
+        copy_inputs[1],
+        kernel_layout="OIHW16i16o",
+        tile_size=tile_size)
+    copy_inputs[1] = transformed_weight
+    new_attrs['tile_size'] = tile_size
+    new_attrs['layout'] = 'NCHW16c'
+    new_attrs['out_layout'] = 'NCHW16c'
+    new_attrs['kernel_layout'] = 'OIHW16i16o'
+    # import ipdb; ipdb.set_trace()
+    logging.info("Winograd selected for %s, %s, %s", attrs, inputs, tinfos)
+    logging.info("Workload: %s", workload)
+    return sym.contrib.conv2d_NCHWc_winograd_without_weight_transform(*copy_inputs, **new_attrs)
+
+
+@conv2d_alter_layout.register("cpu", override=True)
+def _alter_conv2d_layout(attrs, inputs, tinfos):
+    copy_inputs = [s for s in inputs]
+    new_attrs = {k : attrs[k] for k in attrs.keys()}
+    # only optimize for NCHW, groups=1 conv
+    if attrs['layout'] != 'NCHW' or attrs.get_int("groups") != 1:
+        return None
+
+    data = tinfos[0]
+    kernel = tinfos[1]
+
+    strides = attrs.get_int_tuple("strides")
+    padding = attrs.get_int_tuple("padding")
+    groups = attrs.get_int('groups')
+    layout = attrs["layout"]
+    out_dtype = attrs["out_dtype"]
+    out_dtype = tinfos[0].dtype if out_dtype == "same" else out_dtype
+
+    # workload = _conv_arg_to_workload(data, kernel, strides, padding,
+    #                                  layout, out_dtype)
+
+    try:
+        return winograd_alter_layout_transform(attrs, inputs, tinfos)
+    except:
+        logging.debug("Failed to find Winograd transform for %s, %s, %s", attrs, inputs, tinfos)
+    wkl = _get_workload(data, kernel, strides, padding, data.dtype)
+    if wkl.in_filter % 16 == 0 and wkl.out_filter % 16 == 0:
+        logging.debug("Altering layout to NCHW16c")
+        new_attrs['layout'] = 'NCHW16c'
+        new_attrs['out_layout'] = 'NCHW16c'
+        new_attrs['kernel_layout'] = 'OIHW16i16o'
+        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+    if wkl.in_filter % 3 == 0 and wkl.out_filter % 16 == 0:
+        new_attrs['layout'] = 'NCHW3c'
+        new_attrs['out_layout'] = 'NCHW16c'
+        new_attrs['kernel_layout'] = 'OIHW3i16o'
+        return sym.contrib.conv2d_NCHWc(*copy_inputs, **new_attrs)
+
 
 @conv2d.register('cpu', override=True)
 @autotvm.task.dispatcher
@@ -45,7 +136,7 @@ def conv2d_NCHWc_cpu(data, kernel, num_filter, kernel_size, stride, padding, lay
         Dispatcher will use this workload to query corresponding config.
         Then use cfg.template_key to call a registered template.
     """
-    return unet_conv2d_direct._conv_NCHWc_arg_to_workload(data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype)
+    return unet_conv2d_NCHWc_direct._conv_NCHWc_arg_to_workload(data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype)
 
 @conv2d_cpu.register(['direct'])
 def decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype):
@@ -55,11 +146,15 @@ def decl_spatial_pack(cfg, data, kernel, strides, padding, layout, out_dtype):
 
 @conv2d_NCHWc_cpu.register(['direct'])
 def decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
-    return unet_conv2d_direct._decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype)
+    return unet_conv2d_NCHWc_direct._decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype)
 
 @conv2d_NCHWc_cpu.register(['winograd'])
 def decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
     return unet_conv2d_winograd._decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype, m=4)
+
+# @conv2d_NCHWc_winograd_without_weight_transform.register('cpu', override=True)
+# def conv2d_NCHWc_winograd_without_weight_transform(input, filter, strides, padding,
+#                                                    layout, out_dtype, tile_size):
 
 
 @autotvm.register_topi_schedule(
@@ -71,7 +166,7 @@ def schedule_conv2d_NCHWc_cpu(cfg, outs):
         # schedule conv2d
         if 'spatial_conv2d_output' in op.tag:
             output = op.output(0)
-            unet_conv2d_direct._schedule_spatial_pack_NCHWc(cfg, s, output, outs[0])
+            unet_conv2d_NCHWc_direct._schedule_spatial_pack_NCHWc(cfg, s, output, outs[0])
         if 'winograd_conv2d_output' in op.tag:
             output = op.output(0)
             unet_conv2d_winograd._schedule_winograd_NCHWc(cfg, s, output, outs[0])
@@ -292,4 +387,47 @@ def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,
         else:
             pass
             # s[kernel_vec].parallel(co)
+    return s
+
+@conv2d_NCHWc_winograd_without_weight_transform.register('cpu')
+@autotvm.task.dispatcher
+def _conv2d_NCHWc_winograd_without_weight_transform_config_dispatcher(data, kernel, strides, padding, layout, out_dtype, tile_size):
+    # import ipdb; ipdb.set_trace()
+    KH = 3
+    KW = 3
+    (COO, CII, CIII, alpha_h, alpha_w, COOO) = get_const_tuple(kernel.shape)
+    assert alpha_h == tile_size + KH - 1
+    assert alpha_w == tile_size + KW - 1
+
+    kernel_NCHWc = tvm.placeholder((COO, CII, KH, KW, CIII, COOO), dtype=kernel.dtype)
+    workload = unet_conv2d_NCHWc_direct._conv_NCHWc_arg_to_workload(data, kernel_NCHWc, COO * COOO, (KH, KW), strides, padding, layout="NCHW16c", out_layout="NCHW16c", out_dtype="float32")
+    print(workload)
+    return workload
+
+
+@_conv2d_NCHWc_winograd_without_weight_transform_config_dispatcher.register(['winograd'])
+def _decl_conv2d_NCHWc_winograd_without_weight_transform(cfg, data, kernel, strides, padding, layout, out_dtype, tile_size):
+    # import ipdb; ipdb.set_trace()
+    (COO, CII, CIII, alpha_h, alpha_w, COOO) = get_const_tuple(kernel.shape)
+    KH = 3
+    KW = 3
+    assert alpha_h == tile_size + KH - 1, get_const_tuple(kernel.shape)
+    assert alpha_w == tile_size + KW - 1, get_const_tuple(kernel.shape)
+    num_filter = COO * COOO
+    kernel_size = (3, 3)
+    return unet_conv2d_winograd._decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, strides, padding, layout=layout, out_layout=layout, out_dtype=out_dtype, m=tile_size)
+
+
+@autotvm.register_topi_schedule(schedule_conv2d_NCHWc_winograd_without_weight_transform,
+                                'cpu', ['winograd'])
+def _schedule_conv2d_NCHWc_winograd_without_weight_transform(cfg, outs):
+    """TOPI schedule callback"""
+    s = tvm.create_schedule([x.op for x in outs])
+
+    def _callback(op):
+        if 'winograd_conv2d_output' in op.tag:
+            output = op.output(0)
+            unet_conv2d_winograd._schedule_winograd_NCHWc(cfg, s, output, outs[0])
+
+    traverse_inline(s, outs[0].op, _callback)
     return s

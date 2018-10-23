@@ -98,13 +98,29 @@ def get_transform_matrices(m):
 
 def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype, m):
     # create workload according to raw arguments
-    wkl = unet_conv2d_direct._conv_NCHWc_arg_to_workload(
-        data, kernel, num_filter, kernel_size,
-        stride, padding, layout, out_layout, out_dtype)
 
     out_dtype = out_dtype or data.dtype
     N, CII, IH, IW, CIII = get_const_tuple(data.shape)
     COO, CII, KH, KW, CIII_, VC = get_const_tuple(kernel.shape)
+
+    if (KH, KW) != (3, 3):
+        COO, CII, CIII_, alpha_h, alpha_w, VC = get_const_tuple(kernel.shape)
+        assert alpha_h == m + 3 - 1
+        assert alpha_w == m + 3 - 1
+        KH = 3
+        KW = 3
+        need_packing = False
+        kernel_placeholder = tvm.placeholder((COO, CII, KH, KW, CIII_, VC), dtype="float32")
+    else:
+        kernel_placeholder = kernel
+        need_packing = True
+
+    wkl = unet_conv2d_direct._conv_NCHWc_arg_to_workload(
+        data, kernel_placeholder, num_filter, kernel_size,
+        stride, padding, layout, out_layout, out_dtype)
+
+    assert (KH, KW) == (3, 3)
+
 
     pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (KH, KW))
     HSTR, WSTR = stride if isinstance(stride, (tuple, list)) else (stride, stride)
@@ -119,8 +135,8 @@ def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, pad
 
     def div_round_up(a, b):
         return (a + b - 1) // b
-
-    assert all(k == 3 for k in (KH, KW))
+    # import ipdb; ipdb.set_trace()
+    # assert all(k == 3 for k in (KH, KW))
     assert all(p == 1 for p in (pad_top, pad_left, pad_bottom, pad_right))
     assert all(s == 1 for s in (HSTR, WSTR))
     assert OH == IH
@@ -186,13 +202,17 @@ def _decl_winograd_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, pad
 
 
     # transform kernel
-    r_kh = tvm.reduce_axis((0, KH), 'r_kh')
-    r_kw = tvm.reduce_axis((0, KW), 'r_kw')
-    U = tvm.compute((COO, CII, CIII, alpha, alpha, VC),
-                    lambda coo, cii, ciii, eps, nu, vc:
-                    tvm.sum(kernel[coo][cii][r_kh][r_kw][ciii][vc].astype(out_dtype) *
-                            G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]),
-                    name='U')
+    if need_packing:
+        r_kh = tvm.reduce_axis((0, KH), 'r_kh')
+        r_kw = tvm.reduce_axis((0, KW), 'r_kw')
+        U = tvm.compute((COO, CII, CIII, alpha, alpha, VC),
+                        lambda coo, cii, ciii, eps, nu, vc:
+                        tvm.sum(kernel[coo][cii][r_kh][r_kw][ciii][vc].astype(out_dtype) *
+                                G[eps][r_kh] * G[nu][r_kw], axis=[r_kh, r_kw]),
+                        name='U')
+    else:
+        assert get_const_tuple(kernel.shape) == (COO, CII, CIII, alpha, alpha, VC)
+        U = kernel
 
     # transform image
     r_eps = tvm.reduce_axis((0, alpha), 'r_eps')
@@ -296,6 +316,7 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     r_eps, r_nu = s[V].op.reduce_axis
 
     s[V].vectorize(ciii)
+    # import ipdb; ipdb.set_trace()
     cfg["reorder_V"].apply(s, V, [n, cii, oh_m, ow_m, eps, nu, ciii, r_eps, r_nu])
 
     cfg.define_annotate("reduce_V", [r_eps, r_nu, eps, nu],
@@ -359,8 +380,12 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
 
     ############################################################
     # output
-    n, coo, oh, ow, vc = s[output].op.axis
-    s[output].vectorize(vc)
+
+    if output != last:
+        s[output].compute_inline()
+
+    n, coo, oh, ow, vc = s[last].op.axis
+    s[last].vectorize(vc)
 
     OH = get_const_int(oh.dom.extent)
     OW = get_const_int(ow.dom.extent)
@@ -372,18 +397,16 @@ def _schedule_winograd_NCHWc(cfg, s, output, last):
     if OH % mh == 0 and OW % mw == 0 and cfg['output_tile'].val == 1:
         # We can tile in OH
         output_tile = True
-        oh, ow, ohi, owi = s[output].tile(oh, ow, mh, mw)
-        cfg["reduce_output"].apply(s, output, [ohi, owi], cfg=cfg)
+        oh, ow, ohi, owi = s[last].tile(oh, ow, mh, mw)
+        cfg["reduce_output"].apply(s, last, [ohi, owi], cfg=cfg)
 
     cfg.define_knob('Y_compute_location', [0, 1, 2, 3])
     if cfg['Y_compute_location'].val == 1:
-        s[Y].compute_at(s[output], coo)
+        s[Y].compute_at(s[last], coo)
     if cfg['Y_compute_location'].val == 2:
-        s[Y].compute_at(s[output], oh)
+        s[Y].compute_at(s[last], oh)
     if cfg['Y_compute_location'].val == 3:
-        s[Y].compute_at(s[output], ow)
+        s[Y].compute_at(s[last], ow)
     ############################################################
 
-    if output != last:
-        s[output].compute_inline()
     return s

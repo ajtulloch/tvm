@@ -258,7 +258,6 @@ class ApplyHistoryBest(DispatchContext):
             raise RuntimeError("Need a target context to find the history best. "
                                "Hint: If your target is llvm, use `with tvm.target.create('llvm'):`"
                                " above the dispatcher call. So does other target. ")
-
         # first try matching by model
         for opt in target.options:
             if opt.startswith("-model"):

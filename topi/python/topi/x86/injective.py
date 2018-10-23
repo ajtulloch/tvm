@@ -32,19 +32,19 @@ def schedule_injective(outs):
     # elif len(s[x].op.axis) >= 1:
     #     pass
     #     s[x].parallel(s[x].op.axis[0])
-
+    import logging
     if x.shape[len(x.shape) - 1].value % 16 == 0:
-        print("Scheduling injective with vectorization=16")
+        logging.debug("Scheduling injective with vectorization=16")
         v = list(s[x].op.axis)[-1]
         vo, vi = s[x].split(v, 16)
         s[x].vectorize(vi)
     elif x.shape[len(x.shape) - 1].value % 8 == 0:
-        print("Scheduling injective with vectorization=8")
+        logging.debug("Scheduling injective with vectorization=8")
         v = list(s[x].op.axis)[-1]
         vo, vi = s[x].split(v, 8)
         s[x].vectorize(vi)
     else:
-        print("Failing to vectorize injective")
+        logging.debug("Failing to vectorize injective")
     return s
 
 @generic.schedule_concatenate.register(["cpu"])

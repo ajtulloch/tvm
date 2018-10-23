@@ -175,7 +175,6 @@ def compute_contrib_conv2d_NCHWc(attrs, inputs, _):
     assert dilation == (1, 1), "not support dilate now"
 
     if groups == 1:
-        print(layout, out_layout)
         # pylint: disable=assignment-from-no-return
         out = topi.nn.conv2d_NCHWc(inputs[0], inputs[1], channels, (kh, kw),
                                    strides, padding, layout, out_layout)
@@ -213,13 +212,23 @@ reg.register_pattern("_contrib_conv2d_NCHWc", OpPattern.OUT_ELEMWISE_FUSABLE)
 def compute_contrib_conv2d_winograd_weight_transform(attrs, inputs, _):
     return topi.nn.conv2d_winograd_weight_transform(inputs[0], attrs.get_int('tile_size'))
 
+@reg.register_compute("_contrib_conv2d_NCHWc_winograd_weight_transform")
+def compute_contrib_conv2d_NCHWc_winograd_weight_transform(attrs, inputs, _):
+    return topi.nn.conv2d_NCHWc_winograd_weight_transform(inputs[0], attrs.get_int('tile_size'), attrs.get_string("kernel_layout"))
+
 @reg.register_schedule("_contrib_conv2d_winograd_weight_transform")
 def schedule_contrib_conv2d_winograd_weight_transform(attrs, outs, target):
     with tvm.target.create(target):
         return topi.generic.schedule_conv2d_winograd_weight_transform(outs)
 
+@reg.register_schedule("_contrib_conv2d_NCHWc_winograd_weight_transform")
+def schedule_contrib_conv2d_NCHWc_winograd_weight_transform(attrs, outs, target):
+    with tvm.target.create(target):
+        return topi.generic.schedule_conv2d_NCHWc_winograd_weight_transform(outs)
+
 reg.register_pattern("_contrib_conv2d_winograd_weight_transform", OpPattern.OUT_ELEMWISE_FUSABLE)
 
+reg.register_pattern("_contrib_conv2d_NCHWc_winograd_weight_transform", OpPattern.OUT_ELEMWISE_FUSABLE)
 
 @reg.register_compute("_contrib_conv2d_winograd_without_weight_transform")
 def compute_contrib_conv2d_winograd_without_weight_transform(attrs, inputs, _):
@@ -246,12 +255,46 @@ def compute_contrib_conv2d_winograd_without_weight_transform(attrs, inputs, _):
         out = topi.add(out, bias)
     return out
 
+@reg.register_compute("_contrib_conv2d_NCHWc_winograd_without_weight_transform")
+def compute_contrib_conv2d_NCHWc_winograd_without_weight_transform(attrs, inputs, _):
+    """Compute definition of conv2d NCHWc"""
+    padding = attrs.get_int_tuple("padding")
+    strides = attrs.get_int_tuple("strides")
+    dilation = attrs.get_int_tuple("dilation")
+    groups = attrs.get_int("groups")
+    layout = attrs.get_string("layout")
+    out_layout = attrs.get_string("out_layout")
+    out_dtype = attrs.get_string("out_dtype")
+    tile_size = attrs.get_int("tile_size")
+    out_dtype = inputs[0].dtype if out_dtype == "same" else out_dtype
+    assert dilation == (1, 1), "Do not support dilate now"
+    assert groups == 1, "Do not supoort arbitrary group number"
+
+    # pylint: disable=assignment-from-no-return
+    out = topi.nn.conv2d_NCHWc_winograd_without_weight_transform(
+        inputs[0], inputs[1], strides, padding, layout, out_dtype,
+        tile_size)
+
+    if attrs.get_bool("use_bias"):
+        bias = inputs[2]
+        bias = topi.expand_dims(bias, axis=1, num_newaxis=2)
+        out = topi.add(out, bias)
+    return out
+
 @reg.register_schedule("_contrib_conv2d_winograd_without_weight_transform")
 def schedule_contrib_conv2d_winograd_without_weight_transform(attrs, outs, target):
     with tvm.target.create(target):
         return topi.generic.schedule_conv2d_winograd_without_weight_transform(outs)
 
+@reg.register_schedule("_contrib_conv2d_NCHWc_winograd_without_weight_transform")
+def schedule_contrib_conv2d_NCHWc_winograd_without_weight_transform(attrs, outs, target):
+    with tvm.target.create(target):
+        return topi.generic.schedule_conv2d_NCHWc_winograd_without_weight_transform(outs)
+
 reg.register_pattern("_contrib_conv2d_winograd_without_weight_transform",
+                     OpPattern.OUT_ELEMWISE_FUSABLE)
+
+reg.register_pattern("_contrib_conv2d_NCHWc_winograd_without_weight_transform",
                      OpPattern.OUT_ELEMWISE_FUSABLE)
 
 

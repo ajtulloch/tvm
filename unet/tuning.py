@@ -68,7 +68,7 @@ def apply_winograd(tasks):
         try:
             return autotvm.task.create(task.name, task.args,
                                        task.target, task.target_host, 'winograd')
-        except AssertionError:
+        except (AssertionError, KeyError):
             logging.exception("Failed to construct Winograd variant task for task: %s", task)
             return None
     ts = [f(task) for task in tasks]

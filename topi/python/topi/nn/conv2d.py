@@ -378,9 +378,56 @@ def conv2d_winograd_weight_transform(kernel, tile_size):
                                axis=[r_kh, r_kw]), name='transform_weight')
 
 
+def conv2d_winograd_nnpack_weight_transform(kernel):
+    """Weight transformation for winograd
+
+    Parameters
+    ----------
+    kernel: Tensor
+        The raw kernel tensor with layout "NCHW". Only 3x3 kernel is supported for now
+    tile_size: int
+        Tile size of winograd transform. e.g. 2 for F(2x2, 3x3) and 4 for F(4x4, 3x3)
+
+    Returns
+    -------
+    output : tvm.Tensor
+        4-D with shape [alpha, alpha, CO, CI]
+    """
+    from tvm.contrib import nnpack
+    return nnpack.convolution_inference_weight_transform(
+        kernel,
+        algorithm=nnpack.ConvolutionAlgorithm.WT_8x8)
+
+
 @tvm.target.generic_func
 def conv2d_winograd_without_weight_transform(input, filter, strides, padding, dilation,
                                              layout, out_dtype, tile_size):
+    """Compute convolution in winograd algorithm. The filter is supposed to be transformed
+    in advance.
+
+    Parameters
+    ----------
+    input : tvm.Tensor
+        4-D with shape [batch, in_height, in_width, in_channel]
+    filter : tvm.Tensor
+        4-D with shape [filter_height, filter_width, in_channel, num_filter]
+    strides : int or a list/tuple of two ints
+        Stride size, or [stride_height, stride_width]
+    padding : int or str
+        Padding size, or ['VALID', 'SAME']
+    tile_size: int
+        Tile size of winograd transform. e.g. 2 for F(2x2, 3x3) and 4 for F(4x4, 3x3)
+
+    Returns
+    -------
+    output : tvm.Tensor
+        4-D with shape [batch, out_height, out_width, out_channel]
+    """
+    raise ValueError("missing register for topi.nn.conv2d_winograd_without_weight_transform")
+
+@tvm.target.generic_func
+def conv2d_winograd_nnpack_without_weight_transform(
+        input, filter, bias, strides, padding, dilation, layout, out_dtype):
     """Compute convolution in winograd algorithm. The filter is supposed to be transformed
     in advance.
 

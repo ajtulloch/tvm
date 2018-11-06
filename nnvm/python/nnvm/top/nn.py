@@ -195,12 +195,22 @@ reg.register_pattern("_contrib_conv2d_NCHWc", OpPattern.OUT_ELEMWISE_FUSABLE)
 def compute_contrib_conv2d_winograd_weight_transform(attrs, inputs, _):
     return topi.nn.conv2d_winograd_weight_transform(inputs[0], attrs.get_int('tile_size'))
 
+@reg.register_compute("_contrib_conv2d_winograd_nnpack_weight_transform")
+def compute_contrib_conv2d_winograd_nnpack_weight_transform(attrs, inputs, _):
+    return topi.nn.conv2d_winograd_nnpack_weight_transform(inputs[0])
+
 @reg.register_schedule("_contrib_conv2d_winograd_weight_transform")
 def schedule_contrib_conv2d_winograd_weight_transform(attrs, outs, target):
     with tvm.target.create(target):
         return topi.generic.schedule_conv2d_winograd_weight_transform(outs)
 
+@reg.register_schedule("_contrib_conv2d_winograd_nnpack_weight_transform")
+def schedule_contrib_conv2d_winograd_nnpack_weight_transform(attrs, outs, target):
+    with tvm.target.create(target):
+        return topi.generic.schedule_conv2d_winograd_nnpack_weight_transform(outs)
+
 reg.register_pattern("_contrib_conv2d_winograd_weight_transform", OpPattern.OUT_ELEMWISE_FUSABLE)
+reg.register_pattern("_contrib_conv2d_winograd_nnpack_weight_transform", OpPattern.OUT_ELEMWISE_FUSABLE)
 
 
 @reg.register_compute("_contrib_conv2d_winograd_without_weight_transform")
@@ -234,6 +244,31 @@ def schedule_contrib_conv2d_winograd_without_weight_transform(attrs, outs, targe
         return topi.generic.schedule_conv2d_winograd_without_weight_transform(outs)
 
 reg.register_pattern("_contrib_conv2d_winograd_without_weight_transform",
+                     OpPattern.OUT_ELEMWISE_FUSABLE)
+
+@reg.register_compute("_contrib_conv2d_winograd_nnpack_without_weight_transform")
+def compute_contrib_conv2d_winograd_nnpack_without_weight_transform(attrs, inputs, _):
+    padding = attrs.get_int_tuple("padding")
+    strides = attrs.get_int_tuple("strides")
+    dilation = attrs.get_int_tuple("dilation")
+    groups = attrs.get_int("groups")
+    layout = attrs.get_string("layout")
+    out_dtype = attrs.get_string("out_dtype")
+    out_dtype = inputs[0].dtype if out_dtype == "same" else out_dtype
+    assert dilation == (1, 1), "Do not support dilate now"
+    assert groups == 1, "Do not supoort arbitrary group number"
+
+    # pylint: disable=assignment-from-no-return
+    out = topi.nn.conv2d_winograd_nnpack_without_weight_transform(
+        inputs[0], inputs[1], inputs[2] if attrs.get_bool("use_bias") else None, strides, padding, dilation, layout, out_dtype)
+    return out
+
+@reg.register_schedule("_contrib_conv2d_winograd_nnpack_without_weight_transform")
+def schedule_contrib_conv2d_winograd_nnpack_without_weight_transform(attrs, outs, target):
+    with tvm.target.create(target):
+        return topi.generic.schedule_conv2d_winograd_nnpack_without_weight_transform(outs)
+
+reg.register_pattern("_contrib_conv2d_winograd_nnpack_without_weight_transform",
                      OpPattern.OUT_ELEMWISE_FUSABLE)
 
 

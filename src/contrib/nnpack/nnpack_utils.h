@@ -9,13 +9,14 @@
 #include <dmlc/thread_local.h>
 #include <dmlc/logging.h>
 #include <nnpack.h>
+#include <unordered_map>
 
 namespace tvm {
 namespace contrib {
 using namespace runtime;
 
 struct NNPackThreadLocalEntry {
-  pthreadpool_t threadpool{NULL};
+  pthreadpool_t threadpool{nullptr};
   static NNPackThreadLocalEntry* ThreadLocal();
 };
 

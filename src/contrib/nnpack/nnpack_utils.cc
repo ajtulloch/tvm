@@ -10,27 +10,38 @@ using namespace runtime;
 
 typedef dmlc::ThreadLocalStore<NNPackThreadLocalEntry> NNPackThreadLocalStore;
 
+
 NNPackThreadLocalEntry* NNPackThreadLocalEntry::ThreadLocal() {
   return NNPackThreadLocalStore::Get();
 }
 
 bool NNPackConfig(uint64_t nthreads) {
   NNPackThreadLocalEntry *entry = NNPackThreadLocalEntry::ThreadLocal();
-  if (entry->threadpool != NULL &&
-      pthreadpool_get_threads_count(entry->threadpool) != nthreads) {
+  if (entry->threadpool && pthreadpool_get_threads_count(entry->threadpool) == nthreads) {
+    CHECK_NE(nthreads, 1);
+    return true;
+  }
+  if (entry->threadpool) {
     pthreadpool_destroy(entry->threadpool);
-    entry->threadpool = NULL;
+    entry->threadpool = nullptr;
   }
-  if (entry->threadpool == NULL) {
-    entry->threadpool = pthreadpool_create(nthreads);
+
+  if (nthreads == 1) {
+    // a null threadpool means the function is invoked on the calling thread,
+    // which is the desired logic for nthreads == 1
+    CHECK(!entry->threadpool);
+    return true;
   }
+
+  entry->threadpool = pthreadpool_create(nthreads);
   return true;
 }
 
 
-TVM_REGISTER_GLOBAL("contrib.nnpack._Config")
+TVM_REGISTER_GLOBAL("tvm.contrib.nnpack._Config")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
     CHECK(NNPackConfig(args[0]));
   });
+
 }  // namespace contrib
 }  // namespace tvm

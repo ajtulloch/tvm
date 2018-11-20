@@ -46,319 +46,344 @@ import timeit
 # The size of the matrix
 # (M, K) x (K, N)
 # You are free to try out different shapes, sometimes TVM optimization outperforms numpy with MKL.
-M = 1024
-K = 1024
-N = 1024
+M = 4
+K = 4
+N = 4
 
 # The default tensor type in tvm
-dtype = "float32"
+dtype = "uint32"
 
 # using Intel AVX2(Advanced Vector Extensions) ISA for SIMD
 # To get the best performance, please change the following line
 # to llvm -mcpu=core-avx2, or specific type of CPU you use
-target = 'llvm'
+target = 'llvm -target=bpf'
 ctx = tvm.context(target, 0)
 
 # Random generated tensor for testing
 a = tvm.nd.array(numpy.random.rand(M, K).astype(dtype), ctx)
 b = tvm.nd.array(numpy.random.rand(K, N).astype(dtype), ctx)
 
-np_repeat = 100
-np_runing_time = timeit.timeit(setup='import numpy\n'
-                                     'M = ' + str(M) + '\n'
-                                     'K = ' + str(K) + '\n'
-                                     'N = ' + str(N) + '\n'
-                                     'dtype = "float32"\n'
-                                     'a = numpy.random.rand(M, K).astype(dtype)\n'
-                                     'b = numpy.random.rand(K, N).astype(dtype)\n',
-                               stmt='answer = numpy.dot(a, b)',
-                               number=np_repeat)
-print("Numpy running time: %f" % (np_runing_time / np_repeat))
+# np_repeat = 100
+# np_runing_time = timeit.timeit(setup='import numpy\n'
+#                                      'M = ' + str(M) + '\n'
+#                                      'K = ' + str(K) + '\n'
+#                                      'N = ' + str(N) + '\n'
+#                                      'dtype = "float32"\n'
+#                                      'a = numpy.random.rand(M, K).astype(dtype)\n'
+#                                      'b = numpy.random.rand(K, N).astype(dtype)\n',
+#                                stmt='answer = numpy.dot(a, b)',
+#                                number=np_repeat)
+# print("Numpy running time: %f" % (np_runing_time / np_repeat))
 
-answer = numpy.dot(a.asnumpy(), b.asnumpy())
+# answer = numpy.dot(a.asnumpy(), b.asnumpy())
 
 # Algorithm
 k = tvm.reduce_axis((0, K), 'k')
-A = tvm.placeholder((M, K), name='A')
-B = tvm.placeholder((K, N), name='B')
+A = tvm.placeholder((M, K), name='A', dtype=dtype)
+B = tvm.placeholder((K, N), name='B', dtype=dtype)
 C = tvm.compute(
            (M, N),
-           lambda x, y: tvm.sum(A[x, k] * B[k, y], axis=k),
+           lambda x, y: tvm.sum(A[x, k].astype(dtype) * B[k, y].astype(dtype), axis=k),
            name='C')
+xx = tvm.reduce_axis((0, M), 'xx')
+yy = tvm.reduce_axis((0, N), 'yy')
+
+D = tvm.compute(
+           (1,),
+           lambda _: tvm.sum(C[xx, yy], axis=[xx, yy]),
+           name='D')
 
 # Default schedule
-s = tvm.create_schedule(C.op)
-func = tvm.build(s, [A, B, C], target=target, name='mmult')
-assert func
+s = tvm.create_schedule(D.op)
+# s[C].compute_inline()
 
+# func = tvm.build(s, [A, B, C], target='llvm', name='mmult')
+# assert func
+# c = tvm.nd.array(numpy.zeros((M, N), dtype=dtype), ctx)
+# func.save("xcpu.ll")
+# func.save("xcpu.o")
+
+
+# s[C].unroll(s[C].op.axis[0])
+# s[C].unroll(s[C].op.axis[1])
+# s[C].unroll(s[C].op.reduce_axis[0])
+
+
+# s[C].unroll(s[C].op.reduce_axis[0])
+func = tvm.build(s, [A, B, D], target=target, name='mmult')
+print(tvm.lower(s, [A, B, D], simple_mode=True))
+assert func
 c = tvm.nd.array(numpy.zeros((M, N), dtype=dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
-
-evaluator = func.time_evaluator(func.entry_name, ctx, number=1)
-print('Baseline: %f' % evaluator(a, b, c).mean)
-
-################################################################################################
-# In TVM, we can always inspect lower level IR to debug or optimize our schedule.
-# Here is the generated IR using our baseline schedule.
-
-print(tvm.lower(s, [A, B, C], simple_mode=True))
+func.save("x.ll")
+func.save("x.o")
+
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=1)
+# print('Baseline: %f' % evaluator(a, b, c).mean)
 
-################################################################################################
-# Blocking
-# --------
-# A important trick to enhance the cache hit rate is blocking --- data chunk will be computed
-# block by block. The memory access inside the block is a small neighbourhood which is with high
-# memory locality. In this tutorial, I picked up 32 as the blocking factor. So the block will
-# fill 32 * 32 * sizeof(float) which is 4KB in the cache whose total size is 32KB (L1 data cache)
+# ################################################################################################
+# # In TVM, we can always inspect lower level IR to debug or optimize our schedule.
+# # Here is the generated IR using our baseline schedule.
 
-bn = 32
-s = tvm.create_schedule(C.op)
-
-# Blocking by loop tiling
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
-k, = s[C].op.reduce_axis
-ko, ki = s[C].split(k, factor=4)
-
-# Hoist reduction domain outside the blocking loop
-s[C].reorder(xo, yo, ko, ki, xi, yi)
-
-func = tvm.build(s, [A, B, C], target=target, name='mmult')
-assert func
-
-c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
-
-# By simply tiling the loop 32x32, and hoisting ko, ki outside the blocking loops,
-# we can see big speedup compared with the baseline.
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt1: %f' % evaluator(a, b, c).mean)
-
-################################################################################################
-# Here is the generated IR after blocking.
-
-print(tvm.lower(s, [A, B, C], simple_mode=True))
-
-###################################################################################################
-# Vectorization
-# -------------
-# Another important trick is vectorization. When the memory access pattern is uniform,
-# the compiler can detect this pattern and pass the continuous memory to vector processor. In TVM,
-# we can use `vectorize` interface to hint the compiler this pattern, so that we can accelerate it vastly.
-#
-# In this tutorial, we chose to vectorize the inner loop row data since it is cache friendly.
-
-s = tvm.create_schedule(C.op)
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
-k, = s[C].op.reduce_axis
-ko, ki = s[C].split(k, factor=4)
-
-s[C].reorder(xo, yo, ko, ki, xi, yi)
-
-# Vectorization
-s[C].vectorize(yi)
-
-func = tvm.build(s, [A, B, C], target=target, name='mmult')
-assert func
-
-c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
-
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt2: %f' % evaluator(a, b, c).mean)
-
-################################################################################################
-# Here is the generated IR after vectorization.
-
-print(tvm.lower(s, [A, B, C], simple_mode=True))
-
-###################################################################################################
-# Loop Permutation
-# ----------------
-# If we look at the above IR, we can see the inner loop row data is vectorized and
-# B is transformed into PackedB. The traversal of PackedB is sequential now.
-# So we will look at the access pattern of A. In current schedule, A is accessed column by column
-# which is not cache friendly. If we change the nested loop order of ki and inner axes xi,
-# the access pattern for A matrix is more cache friendly.
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
 
-s = tvm.create_schedule(C.op)
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
-k, = s[C].op.reduce_axis
-ko, ki = s[C].split(k, factor=4)
+# ################################################################################################
+# # Blocking
+# # --------
+# # A important trick to enhance the cache hit rate is blocking --- data chunk will be computed
+# # block by block. The memory access inside the block is a small neighbourhood which is with high
+# # memory locality. In this tutorial, I picked up 32 as the blocking factor. So the block will
+# # fill 32 * 32 * sizeof(float) which is 4KB in the cache whose total size is 32KB (L1 data cache)
 
-# re-ordering
-s[C].reorder(xo, yo, ko, xi, ki, yi)
-s[C].vectorize(yi)
+# bn = 32
+# s = tvm.create_schedule(C.op)
+
+# # Blocking by loop tiling
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+# k, = s[C].op.reduce_axis
+# ko, ki = s[C].split(k, factor=4)
+
+# # Hoist reduction domain outside the blocking loop
+# s[C].reorder(xo, yo, ko, ki, xi, yi)
+
+# func = tvm.build(s, [A, B, C], target=target, name='mmult')
+# assert func
+
+# c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+# # By simply tiling the loop 32x32, and hoisting ko, ki outside the blocking loops,
+# # we can see big speedup compared with the baseline.
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
+# print('Opt1: %f' % evaluator(a, b, c).mean)
+
+# ################################################################################################
+# # Here is the generated IR after blocking.
+
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
+
+# ###################################################################################################
+# # Vectorization
+# # -------------
+# # Another important trick is vectorization. When the memory access pattern is uniform,
+# # the compiler can detect this pattern and pass the continuous memory to vector processor. In TVM,
+# # we can use `vectorize` interface to hint the compiler this pattern, so that we can accelerate it vastly.
+# #
+# # In this tutorial, we chose to vectorize the inner loop row data since it is cache friendly.
+
+# s = tvm.create_schedule(C.op)
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+# k, = s[C].op.reduce_axis
+# ko, ki = s[C].split(k, factor=4)
+
+# s[C].reorder(xo, yo, ko, ki, xi, yi)
+
+# # Vectorization
+# s[C].vectorize(yi)
+
+# func = tvm.build(s, [A, B, C], target=target, name='mmult')
+# assert func
 
-func = tvm.build(s, [A, B, C], target=target, name='mmult')
-assert func
+# c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
+# print('Opt2: %f' % evaluator(a, b, c).mean)
+
+# ################################################################################################
+# # Here is the generated IR after vectorization.
+
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt3: %f' % evaluator(a, b, c).mean)
+# ###################################################################################################
+# # Loop Permutation
+# # ----------------
+# # If we look at the above IR, we can see the inner loop row data is vectorized and
+# # B is transformed into PackedB. The traversal of PackedB is sequential now.
+# # So we will look at the access pattern of A. In current schedule, A is accessed column by column
+# # which is not cache friendly. If we change the nested loop order of ki and inner axes xi,
+# # the access pattern for A matrix is more cache friendly.
 
-################################################################################################
-# Here is the generated IR after loop permutation.
+# s = tvm.create_schedule(C.op)
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+# k, = s[C].op.reduce_axis
+# ko, ki = s[C].split(k, factor=4)
 
-print(tvm.lower(s, [A, B, C], simple_mode=True))
+# # re-ordering
+# s[C].reorder(xo, yo, ko, xi, ki, yi)
+# s[C].vectorize(yi)
 
-###################################################################################################
-# Array Packing
-# -------------
-# Another important trick is array packing. This trick is to reorder the storage dimension of the
-# array to convert the continuous access pattern on certain dimension to a sequential pattern after
-# flattening.
-#
-# .. image:: https://github.com/dmlc/web-data/raw/master/tvm/tutorial/array-packing.png
-#      :align: center
-#      :scale: 100%
-#
+# func = tvm.build(s, [A, B, C], target=target, name='mmult')
+# assert func
 
+# c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-###################################################################################################
-# Just as it is shown in the figure above, after blocking the computations, we can observe the array
-# access pattern of B (after flattening), which is regular but discontinuous. We expect that after
-# some transformation we can get continuous access pattern. We can reorder a [16][16] array to
-# a [16/4][16][4] array, so that the access pattern of B will be sequential when grabing
-# the corresponding value from the packed array.
-#
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
+# print('Opt3: %f' % evaluator(a, b, c).mean)
 
-# We have to re-write the algorithm slightly.
-packedB = tvm.compute((N / bn, K, bn), lambda x, y, z: B[y, x * bn + z], name='packedB')
-C = tvm.compute((M, N),
-                lambda x, y: tvm.sum(A[x, k] * packedB[y / bn, k, y % bn], axis=k),
-                name = 'C')
+# ################################################################################################
+# # Here is the generated IR after loop permutation.
 
-s = tvm.create_schedule(C.op)
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
 
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
-k, = s[C].op.reduce_axis
-ko, ki = s[C].split(k, factor=4)
+# ###################################################################################################
+# # Array Packing
+# # -------------
+# # Another important trick is array packing. This trick is to reorder the storage dimension of the
+# # array to convert the continuous access pattern on certain dimension to a sequential pattern after
+# # flattening.
+# #
+# # .. image:: https://github.com/dmlc/web-data/raw/master/tvm/tutorial/array-packing.png
+# #      :align: center
+# #      :scale: 100%
+# #
 
-s[C].reorder(xo, yo, ko, xi, ki, yi)
-s[C].vectorize(yi)
 
-x, y, z = s[packedB].op.axis
-s[packedB].vectorize(z)
-s[packedB].parallel(x)
+# ###################################################################################################
+# # Just as it is shown in the figure above, after blocking the computations, we can observe the array
+# # access pattern of B (after flattening), which is regular but discontinuous. We expect that after
+# # some transformation we can get continuous access pattern. We can reorder a [16][16] array to
+# # a [16/4][16][4] array, so that the access pattern of B will be sequential when grabing
+# # the corresponding value from the packed array.
+# #
 
-func = tvm.build(s, [A, B, C], target=target, name='mmult')
-assert func
+# # We have to re-write the algorithm slightly.
+# packedB = tvm.compute((N / bn, K, bn), lambda x, y, z: B[y, x * bn + z], name='packedB')
+# C = tvm.compute((M, N),
+#                 lambda x, y: tvm.sum(A[x, k] * packedB[y / bn, k, y % bn], axis=k),
+#                 name = 'C')
 
-c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+# s = tvm.create_schedule(C.op)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt4: %f' % evaluator(a, b, c).mean)
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+# k, = s[C].op.reduce_axis
+# ko, ki = s[C].split(k, factor=4)
 
-################################################################################################
-# Here is the generated IR after array packing.
+# s[C].reorder(xo, yo, ko, xi, ki, yi)
+# s[C].vectorize(yi)
 
-print(tvm.lower(s, [A, B, C], simple_mode=True))
+# x, y, z = s[packedB].op.axis
+# s[packedB].vectorize(z)
+# s[packedB].parallel(x)
 
-################################################################################################
-# Write cache for blocks
-# ----------------------
-# After blocking, the program will write result to C block by block, the access pattern
-# is not sequential. So we can use a sequential cache array to hold the block results and
-# write to C when all the block results are ready.
-#
+# func = tvm.build(s, [A, B, C], target=target, name='mmult')
+# assert func
 
-s = tvm.create_schedule(C.op)
+# c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-# Allocate write cache
-CC = s.cache_write(C, 'global')
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
+# print('Opt4: %f' % evaluator(a, b, c).mean)
 
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+# ################################################################################################
+# # Here is the generated IR after array packing.
 
-# Write cache is computed at yo
-s[CC].compute_at(s[C], yo)
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
 
-# New inner axes
-xc, yc = s[CC].op.axis
+# ################################################################################################
+# # Write cache for blocks
+# # ----------------------
+# # After blocking, the program will write result to C block by block, the access pattern
+# # is not sequential. So we can use a sequential cache array to hold the block results and
+# # write to C when all the block results are ready.
+# #
 
-k, = s[CC].op.reduce_axis
-ko, ki = s[CC].split(k, factor=4)
-s[CC].reorder(ko, xc, ki, yc)
-s[CC].unroll(ki)
-s[CC].vectorize(yc)
+# s = tvm.create_schedule(C.op)
 
-x, y, z = s[packedB].op.axis
-s[packedB].vectorize(z)
-s[packedB].parallel(x)
+# # Allocate write cache
+# CC = s.cache_write(C, 'global')
 
-func = tvm.build(s, [A, B, C], target=target, name='mmult')
-assert func
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
 
-c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+# # Write cache is computed at yo
+# s[CC].compute_at(s[C], yo)
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
-print('Opt5: %f' % evaluator(a, b, c).mean)
+# # New inner axes
+# xc, yc = s[CC].op.axis
 
-################################################################################################
-# Here is the generated IR after blocking.
+# k, = s[CC].op.reduce_axis
+# ko, ki = s[CC].split(k, factor=4)
+# s[CC].reorder(ko, xc, ki, yc)
+# s[CC].unroll(ki)
+# s[CC].vectorize(yc)
 
-print(tvm.lower(s, [A, B, C], simple_mode=True))
+# x, y, z = s[packedB].op.axis
+# s[packedB].vectorize(z)
+# s[packedB].parallel(x)
 
-###################################################################################################
-# Parallel
-# --------
-# Futhermore, we can also utilize multi-core processors to do the thread-level parallelization.
+# func = tvm.build(s, [A, B, C], target=target, name='mmult')
+# assert func
 
-s = tvm.create_schedule(C.op)
+# c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
 
-CC = s.cache_write(C, 'global')
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=10)
+# print('Opt5: %f' % evaluator(a, b, c).mean)
 
-xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
+# ################################################################################################
+# # Here is the generated IR after blocking.
 
-s[CC].compute_at(s[C], yo)
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
 
-xc, yc = s[CC].op.axis
+# ###################################################################################################
+# # Parallel
+# # --------
+# # Futhermore, we can also utilize multi-core processors to do the thread-level parallelization.
 
-k, = s[CC].op.reduce_axis
-ko, ki = s[CC].split(k, factor=4)
-s[CC].reorder(ko, xc, ki, yc)
-s[CC].unroll(ki)
-s[CC].vectorize(yc)
+# s = tvm.create_schedule(C.op)
 
-# parallel
-s[C].parallel(xo)
+# CC = s.cache_write(C, 'global')
 
-x, y, z = s[packedB].op.axis
-s[packedB].vectorize(z)
-s[packedB].parallel(x)
+# xo, yo, xi, yi = s[C].tile(C.op.axis[0], C.op.axis[1], bn, bn)
 
-func = tvm.build(s, [A, B, C], target=target, name = 'mmult')
-assert func
+# s[CC].compute_at(s[C], yo)
 
-c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
-func(a, b, c)
-tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+# xc, yc = s[CC].op.axis
 
-evaluator = func.time_evaluator(func.entry_name, ctx, number=50)
-opt6_time = evaluator(a, b, c).mean
-print('Opt6: %f' % opt6_time)
+# k, = s[CC].op.reduce_axis
+# ko, ki = s[CC].split(k, factor=4)
+# s[CC].reorder(ko, xc, ki, yc)
+# s[CC].unroll(ki)
+# s[CC].vectorize(yc)
 
-################################################################################################
-# Here is the generated IR after parallelization.
+# # parallel
+# s[C].parallel(xo)
 
-print(tvm.lower(s, [A, B, C], simple_mode=True))
+# x, y, z = s[packedB].op.axis
+# s[packedB].vectorize(z)
+# s[packedB].parallel(x)
 
-###################################################################################################
+# func = tvm.build(s, [A, B, C], target=target, name = 'mmult')
+# assert func
 
-##################################################################################################
-# Summary
-# -------
-# After applying the above simple optimizations with only 18 lines of code,
-# our generated code can achieve 60% of the `numpy` performance with MKL.
-# Note that the outputs on the web page reflect the running times on a non-exclusive
-# Docker container, thereby they are *unreliable*. It is highly encouraged to run the
-# tutorial by yourself to observe the performance gain acheived by TVM.
+# c = tvm.nd.array(numpy.zeros((M, N), dtype = dtype), ctx)
+# func(a, b, c)
+# tvm.testing.assert_allclose(c.asnumpy(), answer, rtol=1e-5)
+
+# evaluator = func.time_evaluator(func.entry_name, ctx, number=50)
+# opt6_time = evaluator(a, b, c).mean
+# print('Opt6: %f' % opt6_time)
+
+# ################################################################################################
+# # Here is the generated IR after parallelization.
+
+# print(tvm.lower(s, [A, B, C], simple_mode=True))
+
+# ###################################################################################################
+
+# ##################################################################################################
+# # Summary
+# # -------
+# # After applying the above simple optimizations with only 18 lines of code,
+# # our generated code can achieve 60% of the `numpy` performance with MKL.
+# # Note that the outputs on the web page reflect the running times on a non-exclusive
+# # Docker container, thereby they are *unreliable*. It is highly encouraged to run the
+# # tutorial by yourself to observe the performance gain acheived by TVM.

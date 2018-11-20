@@ -18,12 +18,16 @@ namespace codegen {
 
 std::unique_ptr<CodeGenLLVM> CodeGenLLVM::Create(llvm::TargetMachine *tm) {
   std::string target = tm->getTarget().getName();
+  LOG(INFO) << "Target name: " << target;
   std::string factory_name = "tvm.codegen.llvm.target_" + target;
+  LOG(INFO)<< "Factory name: "<< factory_name;
   const PackedFunc* f = runtime::Registry::Get(factory_name);
   if (f != nullptr) {
     void* handle = (*f)();
+    LOG(INFO)<< "Using factory name: "<< factory_name;
     return std::unique_ptr<CodeGenLLVM>(static_cast<CodeGenLLVM*>(handle));
   } else {
+    LOG(INFO)<< "Using defaault CPU for: "<< factory_name;
     return std::unique_ptr<CodeGenLLVM>(new CodeGenCPU());
   }
 }

@@ -71,6 +71,10 @@ def schedule_dense(_, outs, target):
     with tvm.target.create(target):
         return topi.generic.schedule_dense(outs)
 
+@reg.register_alter_op_layout("dense")
+def alter_conv2d_layout(attrs, inputs, tinfos):
+    return topi.nn.dense_alter_layout(attrs, inputs, tinfos)
+
 reg.register_pattern("dense", OpPattern.OUT_ELEMWISE_FUSABLE)
 
 #matmul

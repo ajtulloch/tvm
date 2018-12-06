@@ -168,6 +168,77 @@ def verify_dense_sw(batch, in_dim, out_dim, use_bias=True, dtype='float32'):
 
     check_device('llvm')
 
+def verify_sparse_lengths_sum(M, K, Lsize, Lmax):
+    def get_ref_data():
+        D_np = np.random.randn(M, K).astype(np.float32)
+        L_np = np.random.randint(size=(Lsize,), low=1, high=Lmax).astype(np.int32)
+        Ls = np.sum(L_np)
+        I_np = np.random.randint(size=(Ls,), low=0, high=M).astype(np.int32)
+        return (D_np, L_np, I_np)
+
+    def sparse_lengths_sum_ref(D, I, L):
+        R = np.zeros(shape=(L.size, ) + D.shape[1:], dtype=D.dtype)
+        Lsum = np.cumsum([0] + L.tolist())
+        for g in range(L.size):
+            for gg in range(L[g]):
+                R[g, :] += D[I[Lsum[g] + gg], :]
+        return R
+
+    d_np, l_np, i_np = get_ref_data()
+    sls_np = sparse_lengths_sum_ref(d_np, i_np, l_np)
+
+    D = tvm.placeholder(d_np.shape, dtype="float32", name="D")
+    I = tvm.placeholder((i_np.shape), dtype="int32", name="I")
+    L = tvm.placeholder(l_np.shape, dtype="int32", name="L")
+
+    SLS = topi.sparse.sparse_lengths_sum(D, I, L)
+    s = tvm.create_schedule(SLS.op)
+    f = tvm.build(s, [D, I, L, SLS], target="llvm")
+    d = tvm.ndarray.array(d_np)
+    i = tvm.ndarray.array(i_np)
+    l_ = tvm.ndarray.array(l_np)
+    sls = tvm.ndarray.array(np.zeros_like(sls_np))
+    f(d, i, l_, sls)
+    tvm.testing.assert_allclose(sls.asnumpy(), sls_np, rtol=1e-4, atol=1e-4)
+
+def verify_sparse_lengths_sum_fused_8_bit_rowwise(M, K, Lsize, Lmax):
+    def get_ref_data():
+        D_np = np.random.randint(size=(M, K), low=0, high=256).astype(np.uint8)
+        D_np.view(np.float32)[:, -2:] = np.random.randn(M, 2).astype(np.float32)
+
+        L_np = np.random.randint(size=(Lsize,), low=1, high=Lmax).astype(np.int32)
+        Ls = np.sum(L_np)
+        I_np = np.random.randint(size=(Ls,), low=0, high=M).astype(np.int32)
+        return (D_np, L_np, I_np)
+
+    def sparse_lengths_sum_fused_8_bit_rowwise_ref(D, I, L):
+        R = np.zeros(shape=[L.size, D.shape[1] - 8], dtype=np.float32)
+        Lsum = np.cumsum([0] + L.tolist())
+        for g in range(L.size):
+            for gg in range(L[g]):
+                data_idx = I[Lsum[g] + gg]
+                scale = D[data_idx, -8:].view(np.float32)[0]
+                bias = D[data_idx, -8:].view(np.float32)[1]
+                R[g, :] += D[data_idx, :-8].astype(np.float32) * scale + bias
+        return R
+
+    d_np, l_np, i_np = get_ref_data()
+    sls_np = sparse_lengths_sum_fused_8_bit_rowwise_ref(d_np, i_np, l_np)
+
+    D = tvm.placeholder(d_np.shape, dtype="uint8", name="D")
+    I = tvm.placeholder((i_np.shape), dtype="int32", name="I")
+    L = tvm.placeholder(l_np.shape, dtype="int32", name="L")
+
+    SLS = topi.sparse.sparse_lengths_sum_fused_8_bit_rowwise(D, I, L)
+    s = tvm.create_schedule(SLS.op)
+    f = tvm.build(s, [D, I, L, SLS], target="llvm")
+    d = tvm.ndarray.array(d_np)
+    i = tvm.ndarray.array(i_np)
+    l_ = tvm.ndarray.array(l_np)
+    sls = tvm.ndarray.array(np.zeros_like(sls_np))
+    f(d, i, l_, sls)
+    tvm.testing.assert_allclose(sls.asnumpy(), sls_np, rtol=1e-3, atol=1e-3)
+
 def test_csrmv():
     verify_dynamic_csrmv(batch=5, in_dim=7, out_dim=1, use_bias=False)
     verify_dynamic_csrmv(batch=5, in_dim=7, out_dim=1, use_bias=True)
@@ -199,7 +270,19 @@ def test_dense():
     test_dense_si()
     test_dense_sw()
 
+def test_sparse_lengths_sum():
+    verify_sparse_lengths_sum(M=10, K=16, Lsize=40, Lmax=20)
+    verify_sparse_lengths_sum(M=10, K=16, Lsize=40, Lmax=100)
+    verify_sparse_lengths_sum(M=1, K=1, Lsize=4, Lmax=100)
+
+def test_sparse_lengths_sum_fused_8_bit_rowwise():
+    verify_sparse_lengths_sum_fused_8_bit_rowwise(M=10, K=16, Lsize=40, Lmax=20)
+    verify_sparse_lengths_sum_fused_8_bit_rowwise(M=10, K=16, Lsize=40, Lmax=100)
+    verify_sparse_lengths_sum_fused_8_bit_rowwise(M=1, K=12, Lsize=4, Lmax=100)
+
+
 if __name__ == "__main__":
     test_csrmv()
     test_csrmm()
     test_dense()
+    test_sparse_lengths_sum()

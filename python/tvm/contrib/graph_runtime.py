@@ -37,7 +37,8 @@ def create(graph_json_str, libmod, ctx):
     if num_rpc_ctx == len(ctx):
         hmod = rpc_base._ModuleHandle(libmod)
         fcreate = ctx[0]._rpc_sess.get_function("tvm.graph_runtime.remote_create")
-        return GraphModule(fcreate(graph_json_str, hmod, *device_type_id))
+        fzero_init = ctx[0]._rpc_sess.get_function("tvm.rpc.server.zero_init")
+        return GraphModule(fcreate(graph_json_str, hmod, *device_type_id), fzero_init)
 
     fcreate = get_global_func("tvm.graph_runtime.create")
     return GraphModule(fcreate(graph_json_str, libmod, *device_type_id))
@@ -105,13 +106,14 @@ class GraphModule(object):
         The interal tvm module that holds the actual graph functions.
     """
 
-    def __init__(self, module):
+    def __init__(self, module, zero_init=None):
         self.module = module
         self._set_input = module["set_input"]
         self._run = module["run"]
         self._get_output = module["get_output"]
         self._get_input = module["get_input"]
         self._get_num_outputs = module["get_num_outputs"]
+        self._zero_init = zero_init
         try:
             self._debug_get_output = module["debug_get_output"]
         except AttributeError:
@@ -141,6 +143,25 @@ class GraphModule(object):
             keys.sort(key=lambda x: -np.prod(params[x].shape))
             for k in keys:
                 self._get_input(k).copyfrom(params[k])
+
+    def zero_input(self, **params):
+        """Set inputs to the module via kwargs
+
+        Parameters
+        ----------
+        key : int or str
+           The input key
+
+        value : the input value.
+           The input key
+
+        params : dict of str to NDArray
+           Additonal arguments
+        """
+        for k in params.keys():
+            if self._zero_init:
+                self._zero_init(self._get_input(k))
+
 
     def run(self, **input_dict):
         """Run forward execution of the graph

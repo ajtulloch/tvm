@@ -62,6 +62,7 @@ class TaskExtractEnv:
                               topi.nn.group_conv2d_nchw],
             nnvm.sym.conv2d_transpose: [topi.nn.conv2d_transpose_nchw],
             nnvm.sym.dense: [topi.nn.dense],
+            nnvm.sym.batch_matmul: [topi.nn.batch_matmul],
         }
 
         # topi compute -> autotvm task name
@@ -71,6 +72,7 @@ class TaskExtractEnv:
             topi.nn.group_conv2d_nchw: "topi_nn_group_conv2d_nchw",
             topi.nn.conv2d_transpose_nchw: "topi_nn_conv2d_transpose_nchw",
             topi.nn.dense: "topi_nn_dense",
+            topi.nn.batch_matmul: "topi_nn_batch_matmul",
         }
 
         self.topi_to_schedule = {
@@ -81,6 +83,7 @@ class TaskExtractEnv:
             topi.nn.group_conv2d_nchw: [topi.generic.schedule_group_conv2d_nchw],
             topi.nn.conv2d_transpose_nchw: [topi.generic.schedule_conv2d_transpose_nchw],
             topi.nn.dense: [topi.generic.schedule_dense],
+            topi.nn.batch_matmul: [topi.generic.schedule_batch_matmul],
         }
 
         self._register_tracing()
@@ -175,6 +178,15 @@ class TaskExtractEnv:
                 return s, [data, weight, bias, C]
             return s, [data, weight, C]
 
+        @register("topi_nn_batch_matmul")
+        def _topi_nn_batch_matmul(*args, **kwargs):
+            assert not kwargs, "Do not support kwargs in template function call"
+            args = deserialize_args(args)
+            A, B, trans_a, trans_b = args
+            C = topi.nn.batch_matmul(*args, **kwargs)
+            s = topi.generic.schedule_batch_matmul([C])
+            return s, [A, B, C]
+
     def reset(self, wanted_topi_funcs):
         """Reset task collections
 
@@ -210,7 +222,7 @@ class TaskExtractEnv:
         return TaskExtractEnv.current
 
 
-def extract_from_graph(graph, shape, dtype, target, symbols, target_host=None):
+def extract_from_graph(graph, shape, dtype, target, symbols, target_host=None, params=None):
     """ Extract tuning tasks from a nnvm graph.
 
     This function collects tuning tasks by building the graph
@@ -257,7 +269,7 @@ def extract_from_graph(graph, shape, dtype, target, symbols, target_host=None):
     # use a "tracing" target to do a fake compile for collecting topi calls
     tracing_target = _target.create("llvm -device=tracing")
     nnvm.compiler.engine.clear_cache()
-    nnvm.compiler.build(graph, target=tracing_target, shape=shape, dtype=dtype)
+    nnvm.compiler.build(graph, target=tracing_target, shape=shape, dtype=dtype, params=params)
 
     logger.disabled = old_state
 

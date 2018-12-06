@@ -54,8 +54,9 @@ inline bool DenseInferShape(const nnvm::NodeAttrs& attrs,
     oshape[oshape.ndim() - 1] = param.units;
     NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
   }
-  NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, DenseParam::kWeight,
-                          TShape({param.units, num_inputs}));
+  // Undefined, due to e.g. transpositions.
+  // NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, DenseParam::kWeight,
+  //                         TShape({param.units, num_inputs}));
   if (param.use_bias) {
     NNVM_ASSIGN_INPUT_SHAPE(attrs, *in_shape, DenseParam::kBias, TShape({param.units}));
   }
@@ -117,6 +118,58 @@ If ``use_bias`` is set to be false, then the ``bias`` term is ignored.
     return grads;
 })
 .set_support_level(1);
+
+// Batch MatMul
+DMLC_REGISTER_PARAMETER(BatchMatMulParam);
+
+inline bool BatchMatMulInferShape(const nnvm::NodeAttrs& attrs,
+    std::vector<TShape>* in_shape,
+    std::vector<TShape>* out_shape) {
+  const BatchMatMulParam& param = nnvm::get<BatchMatMulParam>(attrs.parsed);
+  CHECK_EQ(in_shape->size(), 2);
+  CHECK_EQ(out_shape->size(), 1);
+  TShape shape_a = (*in_shape)[0];
+  TShape shape_b = (*in_shape)[1];
+  CHECK_EQ(shape_a.ndim(), shape_b.ndim());
+  CHECK_GE(shape_a.ndim(), 3);
+  size_t ndim = shape_a.ndim();
+  size_t batch_a = 1;
+  for (size_t i = 0; i < ndim - 2UL; ++i) {
+    batch_a *= shape_a[i];
+  }
+  size_t batch_b = 1;
+  for (size_t i = 0; i < ndim - 2UL; ++i) {
+    batch_b *= shape_b[i];
+  }
+  CHECK_EQ(batch_a, batch_b);
+  TShape oshape = shape_a;
+  if (param.trans_a) {
+    oshape[ndim - 2] = shape_a[ndim - 1];
+  }
+  oshape[ndim - 1] = param.trans_b ? shape_b[ndim - 2] : shape_b[ndim - 1];
+  NNVM_ASSIGN_OUTPUT_SHAPE(attrs, *out_shape, 0, oshape);
+  return true;
+}
+
+NNVM_REGISTER_OP(batch_matmul)
+    .describe(R"code(Does Batch MatMul on the two inputs.
+
+- **A**: `(b1, b2, ..., bn, N, K)`
+- **B**: `(b1, b2, ..., bn, K, M)`
+- **out**: `(b1, b2, ..., bn, N, M)`
+
+where out[..., :, :] = A[..., :, :] * B [..., :, :]
+)code" NNVM_ADD_FILELINE)
+    .add_argument("A", "nD Tensor", "Input a.")
+    .add_argument("B", "nD Tensor", "Input b.")
+    .add_arguments(BatchMatMulParam::__FIELDS__())
+    .set_attr_parser(ParamParser<BatchMatMulParam>)
+    .set_attr<FGetAttrDict>("FGetAttrDict", ParamGetAttrDict<BatchMatMulParam>)
+    .set_attr<FInferShape>("FInferShape", BatchMatMulInferShape)
+    .set_attr<FInferType>("FInferType", ElemwiseType<2, 1>)
+    .set_num_inputs(2)
+    .set_num_outputs(1)
+    .set_support_level(1);
 
 // relu
 NNVM_REGISTER_ELEMWISE_UNARY_OP(relu)

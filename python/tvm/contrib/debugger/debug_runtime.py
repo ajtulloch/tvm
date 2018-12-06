@@ -163,7 +163,7 @@ class GraphModuleDebug(graph_runtime.GraphModule):
         Time consumed for each execuion will be set as debug output.
 
         """
-
+        self.debug_datum._time_list = []
         for i, node in enumerate(self.debug_datum.get_graph_nodes()):
             start_time = datetime.now().time()
             time_stamp = self._debug_run(i)

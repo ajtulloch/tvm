@@ -83,6 +83,32 @@ def test_rpc_array():
     fremote = remote.get_function("rpc.test.remote_array_func")
     fremote(r_cpu)
 
+def test_rpc_zero_init():
+    if not tvm.module.enabled("rpc"):
+        return
+    x = np.random.randint(0, 10, size=(3, 4))
+    server = rpc.Server("localhost")
+    remote = rpc.connect(server.host, server.port)
+    r_cpu = tvm.nd.array(x, remote.cpu(0))
+    assert str(r_cpu.context).startswith("remote")
+    np.testing.assert_equal(r_cpu.asnumpy(), x)
+    fremote = remote.get_function("tvm.rpc.server.zero_init")
+    fremote(r_cpu)
+    np.testing.assert_equal(r_cpu.asnumpy(), np.zeros_like(x))
+
+def test_rpc_randn_init():
+    if not tvm.module.enabled("rpc"):
+        return
+    x = np.random.randint(0, 10, size=(3, 4)).astype(np.float32)
+    server = rpc.Server("localhost")
+    remote = rpc.connect(server.host, server.port)
+    r_cpu = tvm.nd.array(x, remote.cpu(0))
+    assert str(r_cpu.context).startswith("remote")
+    np.testing.assert_equal(r_cpu.asnumpy(), x)
+    fremote = remote.get_function("tvm.rpc.server.randn_init")
+    fremote(r_cpu)
+    # np.testing.assert_equal(r_cpu.asnumpy(), np.zeros_like(x))
+
 def test_rpc_file_exchange():
     if not tvm.module.enabled("rpc"):
         return
@@ -326,3 +352,5 @@ if __name__ == "__main__":
     test_local_func()
     test_rpc_tracker_register()
     test_rpc_tracker_request()
+    test_rpc_zero_init()
+    test_rpc_randn_init()

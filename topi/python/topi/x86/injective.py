@@ -3,6 +3,7 @@
 from __future__ import absolute_import as _abs
 import tvm
 from .. import generic
+from .check_targets import fp32_vector_width
 
 @generic.schedule_injective.register(["cpu"])
 def schedule_injective(outs):
@@ -23,14 +24,9 @@ def schedule_injective(outs):
     x = outs[0]
     s = tvm.create_schedule([x.op for x in outs])
     tvm.schedule.AutoInlineInjective(s)
-    if len(s[x].op.axis) >= 5:
-        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
-        s[x].parallel(fused)
-    elif len(s[x].op.axis) >= 3:
-        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
-        s[x].parallel(fused)
-    elif len(s[x].op.axis) >= 1:
-        s[x].parallel(s[x].op.axis[0])
+    axes = list(s[outs[0].op].op.axis)
+    (co, ci) = s[outs[0].op].split(axes[-1], fp32_vector_width())
+    s[outs[0].op].vectorize(ci)
     return s
 
 @generic.schedule_concatenate.register(["cpu"])

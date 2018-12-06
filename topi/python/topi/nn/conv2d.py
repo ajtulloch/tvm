@@ -72,6 +72,22 @@ def conv2d_alter_layout(attrs, inputs, tinfos):
     # not to change by default
     return None
 
+@tvm.target.generic_func
+def dense_alter_layout(attrs, inputs, tinfos):
+    """Change Dense layout.
+
+    Parameters
+    ----------
+    attrs : nnvm.top.AttrDict
+        Attributes of current convolution
+    inputs : nnvm.symbol
+        Grouped input symbols
+    tinfos : list
+        Input shape and dtype
+    """
+    # not to change by default
+    return None
+
 
 def _get_workload(data, kernel, stride, padding, out_dtype):
     """ Get the workload structure. """

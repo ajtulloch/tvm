@@ -181,14 +181,18 @@ class Concat(Caffe2OpConverter):
                 raise RuntimeError(
                     "Unsupported storage order: {} in caffe2".format(order))
 
-        return AttrCvt(
-            op_name='concatenate',
-            transforms={
-                'order': ('axis', (1), _get_axis_from_order_str),
-            },
-            excludes={
-                'add_axis',
-            })(inputs, args, params)
+        concat = _sym.concatenate(*inputs, axis=1)
+        if args.get('add_axis'):
+            concat = _sym.reshape(concat, shape=(0, 1, -1))
+        return concat
+        # return AttrCvt(
+        #     op_name='concatenate',
+        #     transforms={
+        #         'order': ('axis', (1), _get_axis_from_order_str),
+        #     },
+        #     excludes={
+        #         'add_axis',
+        #     })(inputs, args, params)
 
 
 class NormalizePlanarYUV(Caffe2OpConverter):
@@ -203,6 +207,16 @@ class NormalizePlanarYUV(Caffe2OpConverter):
         std = _sym.expand_dims(inputs[2], axis=2, num_newaxis=2)
 
         return _sym.broadcast_div(_sym.broadcast_sub(inputs[0], mean), std)
+
+
+class ExpandDims(Caffe2OpConverter):
+    """ Operator converter for ExpandDims"""
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        output = inputs[0]
+        for dim in args["dims"]:
+            output = _sym.expand_dims(output, axis=dim, num_newaxis=1)
+        return output
 
 
 class ResizeNearest(Caffe2OpConverter):
@@ -233,6 +247,44 @@ class FC(Caffe2OpConverter):
             extras={'use_bias': len(inputs) == 3},
         )(inputs, args, params)
 
+class FCTransposed(Caffe2OpConverter):
+    """ Operator converter for FC.
+    """
+
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        inputs[0] = _sym.flatten(inputs[0])
+        inputs[1] = _sym.transpose(inputs[1], axes=(1, 0))
+        args['units'] = infer_channels(inputs[1], params)
+        return AttrCvt(
+            'dense',
+            ignores=['axis', 'axis_w'],
+            extras={'use_bias': len(inputs) == 3},
+        )(inputs, args, params)
+
+class DotProduct(Caffe2OpConverter):
+    """ Operator converter for DotProduct
+    """
+
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        inputs[0] = _sym.reshape(inputs[0], (0, 1, -1))
+        inputs[1] = _sym.reshape(inputs[1], (0, -1, 1))
+        dot = _sym.batch_matmul(inputs[0], inputs[1])
+        return _sym.reshape(dot, (-1))
+
+
+class ConcatBatchMatMulBatchGatherOp(Caffe2OpConverter):
+    """ Operator converter for ConcatBatchMatMulBatchGatherOp
+    """
+
+    @classmethod
+    def _impl(cls, inputs, args, params):
+        reshapes = [_sym.reshape(input, shape=(0, 1, -1)) for input in inputs[1:]]
+        concat = _sym.concatenate(*reshapes, axis=1)
+        bmm = _sym.batch_matmul(concat, concat, trans_a=False, trans_b=True)
+        bmm_flat = _sym.flatten(bmm)
+        return _sym.batch_gather_nd(bmm_flat, inputs[0])
 
 class SpatialBN(Caffe2OpConverter):
     """ Operator converter for SpatialBN.
@@ -264,6 +316,7 @@ def _get_convert_map():
         'Add': onnx.Add.get_converter(opset=1),
         'Sum': onnx.Sum.get_converter(opset=1),
         'Softmax': onnx.Softmax.get_converter(opset=1),
+        'Reshape': onnx.Reshape.get_converter(opset=1),
 
         # nn
         'AveragePool': AveragePool.get_converter(),
@@ -271,6 +324,7 @@ def _get_convert_map():
         'Conv': Conv.get_converter(),
         'Concat': Concat.get_converter(),
         'FC': FC.get_converter(),
+
         'SpatialBN': SpatialBN.get_converter(),
         'ResizeNearest': ResizeNearest.get_converter(),
         'Relu': AttrCvt('relu', {}, ignores=['order']),
@@ -279,6 +333,17 @@ def _get_convert_map():
 
         # c2 image preprocessing ops
         'NormalizePlanarYUV': NormalizePlanarYUV.get_converter(),
+
+        # c2 ranking
+        'ExpandDims': ExpandDims.get_converter(),
+        'EnsureCPUOutput': Renamer('copy'),
+        'Flatten': Renamer('flatten'),
+        'FCTransposed': FCTransposed.get_converter(),
+        'BatchMatMul': AttrCvt('batch_matmul', ignores=['broadcast']),
+        'DotProduct': DotProduct.get_converter(),
+        'SparseLengthsSumFused8BitRowwise': Renamer('sparse_lengths_sum_fused_8bit_rowwise'),
+        'SparseLengthsSum': Renamer('sparse_lengths_sum'),
+        'ConcatBatchMatMulBatchGatherOp': ConcatBatchMatMulBatchGatherOp.get_converter()
     }
 
 
@@ -338,14 +403,14 @@ class Caffe2NetDef(object):
 
         # Outputs
         out = []
-        for blob in predict_net.external_output:
+        output_blobs = predict_net.op[-1].output
+        for blob in output_blobs:
             out.append(self._nodes[blob])
 
         if len(out) > 1:
             sym = _sym.Group(out)
         else:
             sym = out[0]
-
         return sym, self._params
 
     def _get_node(self, blob):

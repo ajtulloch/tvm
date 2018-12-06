@@ -32,6 +32,20 @@ struct DenseParam : public dmlc::Parameter<DenseParam> {
   static const constexpr int kBias = 2;
 };
 
+struct BatchMatMulParam : public dmlc::Parameter<BatchMatMulParam> {
+  bool trans_a;
+  bool trans_b;
+
+  DMLC_DECLARE_PARAMETER(BatchMatMulParam){
+    DMLC_DECLARE_FIELD(trans_a).set_default(false)
+        .describe("If True, transpose innermost two dimensions of input A before matmul"
+                  "If False, do nothing.");
+    DMLC_DECLARE_FIELD(trans_b).set_default(false)
+        .describe("If True, transpose innermost two dimensions of input B before matmul"
+                  "If False, do nothing.");
+  };
+};
+
 struct DropoutParam : public dmlc::Parameter<DropoutParam> {
   float rate;
 

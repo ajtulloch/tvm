@@ -51,7 +51,7 @@ class Tensor(NodeBase, _expr.ExprOp):
         args = []
         for x in indices:
             if isinstance(x, _expr.Expr):
-                args.append(x)
+                args.append(x.astype("int32"))
             elif isinstance(x, iter_var_cls):
                 args.append(x.var)
             else:

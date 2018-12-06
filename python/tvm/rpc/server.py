@@ -23,6 +23,7 @@ import subprocess
 import time
 import sys
 import signal
+import numpy as np
 
 from .._ffi.function import register_func
 from .._ffi.base import py_str
@@ -42,6 +43,16 @@ def _server_env(load_library):
     @register_func("tvm.rpc.server.workpath")
     def get_workpath(path):
         return temp.relpath(path)
+
+    @register_func("tvm.rpc.server.zero_init")
+    def zero_init(arr):
+        arr.copyfrom(np.atleast_1d(np.zeros(arr.shape, dtype=arr.dtype)))
+        return None
+
+    @register_func("tvm.rpc.server.randn_init")
+    def randn_init(arr):
+        arr.copyfrom(np.atleast_1d(np.random.randn(*arr.shape).astype(arr.dtype)))
+        return None
 
     @register_func("tvm.rpc.server.load_module", override=True)
     def load_module(file_name):

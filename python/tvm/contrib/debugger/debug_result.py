@@ -138,7 +138,7 @@ class DebugResult(object):
         for node, time in zip(self._nodes_list, self._time_list):
             num_outputs = self.get_graph_node_output_num(node)
             for j in range(num_outputs):
-                op = node['op']
+                op = node['op'][:20]
                 if node['op'] == 'param':
                     eid += 1
                     continue

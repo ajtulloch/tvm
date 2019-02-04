@@ -9,11 +9,24 @@
 #include <cstdlib>
 #include <cstring>
 #include "workspace_pool.h"
+#ifdef __SSE__
+#include <pmmintrin.h>
+#endif
 
 namespace tvm {
 namespace runtime {
 class CPUDeviceAPI final : public DeviceAPI {
  public:
+  CPUDeviceAPI() {
+#ifdef __SSE__
+    // Setting flush-to-zero (FTZ) flag
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+    // Setting denormals-are-zero (DAZ) flag
+    _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
+#else
+    #error "SSE"
+#endif
+  }
   void SetDevice(TVMContext ctx) final {}
   void GetAttr(TVMContext ctx, DeviceAttrKind kind, TVMRetValue* rv) final {
     if (kind == kExist) {

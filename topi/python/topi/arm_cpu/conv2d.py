@@ -211,6 +211,7 @@ def _decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, ou
     output = tvm.compute(oshape, lambda n, co, h, w:
                          conv[n][co//VC][h//VH][w//VW][h%VH][w%VW][co%VC],
                          name='output_unpack', tag='spatial_conv2d_output')
+    cfg.add_flop(2 * N * CO * OH * OW * KH * KW * CI)
     return output
 
 def _schedule_spatial_pack(cfg, s, data_vec, kernel_vec,

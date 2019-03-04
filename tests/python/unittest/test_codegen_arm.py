@@ -38,6 +38,7 @@ def test_vmlal_s16():
             A[k, n].astype("int32") * B[k, n].astype("int32"), axis=[k]), name='C')
         s = tvm.create_schedule(C.op)
         s[C].vectorize(s[C].op.axis[0])
+        print(tvm.lower(s, [A, B, C], simple_mode=True))
         f = tvm.build(s, [A, B, C], target)
 
         # Verify we see the correct number of vmlal.s16 instructions

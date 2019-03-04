@@ -176,6 +176,8 @@ def create(func_name, args, target, target_host=None, template_key=None):
             ret.config_space.code_hash = getattr(sch, 'code_hash', None)
 
     ret.workload = ctx.workload
+    print(ret.config_space)
+    print(ret.config_space.flop)
     ret.flop = ret.config_space.flop or compute_flop(sch)
     ret.target = target
     ret.target_host = target_host

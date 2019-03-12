@@ -64,9 +64,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d11, d2[1]\n\t"
                " VMLAL.S16 q12, d10, d4[1]\n\t"
                " VMLAL.S16 q13, d11, d4[1]\n\t"
-
                " VMOVL.S8 q4, d9\n\t"
-
                " VMLAL.S16 q14, d10, d6[1]\n\t"
                " VMLAL.S16 q15, d11, d6[1]\n\t"
 
@@ -92,9 +90,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d11, d2[3]\n\t"
                " VMLAL.S16 q12, d10, d4[3]\n\t"
                " VMLAL.S16 q13, d11, d4[3]\n\t"
-
                " VMOVL.S8 q4, d9\n\t"
-
                " VMLAL.S16 q14, d10, d6[3]\n\t"
                " VMLAL.S16 q15, d11, d6[3]\n\t"
 
@@ -108,9 +104,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d9, d3[0]\n\t"
                " VMLAL.S16 q12, d8, d5[0]\n\t"
                " VMLAL.S16 q13, d9, d5[0]\n\t"
-
                " VMOVL.S8 q5, d11\n\t"
-
                " VMLAL.S16 q14, d8, d7[0]\n\t"
                " VMLAL.S16 q15, d9, d7[0]\n\t"
 
@@ -123,9 +117,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d11, d3[1]\n\t"
                " VMLAL.S16 q12, d10, d5[1]\n\t"
                " VMLAL.S16 q13, d11, d5[1]\n\t"
-
                " VMOVL.S8 q4, d9\n\t"
-
                " VMLAL.S16 q14, d10, d7[1]\n\t"
                " VMLAL.S16 q15, d11, d7[1]\n\t"
 
@@ -138,9 +130,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d9, d3[2]\n\t"
                " VMLAL.S16 q12, d8, d5[2]\n\t"
                " VMLAL.S16 q13, d9, d5[2]\n\t"
-
                " VMOVL.S8 q5, d11\n\t"
-
                " VMLAL.S16 q14, d8, d7[2]\n\t"
                " VMLAL.S16 q15, d9, d7[2]\n\t"
 

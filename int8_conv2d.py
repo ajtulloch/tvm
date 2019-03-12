@@ -14,83 +14,85 @@ from topi.util import traverse_inline, get_const_tuple, const_matrix
 from topi.nn.util import get_const_int, get_pad_tuple
 from topi.nn import pad, conv2d, conv2d_NCHWc, conv2d_alter_layout
 
-def _intrin_int8xint8_int32(m, k_i, w_b, x_b):
-    dtype = 'uint8'
-    w = tvm.placeholder((w_b, m, k_i), dtype=dtype, name='w')
-    x = tvm.placeholder((x_b, k_i,), dtype=dtype, name='x')
-    k = tvm.reduce_axis((0, k_i), name='k')
-    bw = tvm.reduce_axis((0, w_b), name='bw')
-    bx = tvm.reduce_axis((0, x_b), name='bx')
-    z = tvm.compute((m,), lambda i:
-                    tvm.sum(tvm.popcount(w[bw, i, k].astype('uint16') &
-                                         x[bx, k].astype('uint16'))
-                            << (bw+bx).astype('uint16'), axis=[bw, bx, k]), name='z')
 
-    Wb = tvm.decl_buffer(w.shape, w.dtype,
-                         name="W",
-                         offset_factor=k_i,
-                         strides=[tvm.var('ldw'), tvm.var('ldw'), 1])
-    Xb = tvm.decl_buffer(x.shape, x.dtype,
-                         name="X",
-                         offset_factor=k_i,
-                         strides=[tvm.var('ldw'), 1])
+# V
+# Storage - N x H x W x C
+#
+def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
+    dtype = "int8"
+    X = tvm.placeholder((4, K), dtype="int8", name='X')
+    W = tvm.placeholder((K, 8), dtype=dtype, name='X')
+    k = tvm.reduce_axis((0, K), name='k')
+    Z = tvm.compute((4, 8), lambda i, j: tvm.sum(X[i, k].astype("int32") * W[k, j].astype("int32"), axis=[k]), name="Z")
+
+    Xb = tvm.decl_buffer(X.shape, X.dtype,
+                         name="Xb",
+                         offset_factor=K,
+                         strides=[tvm.var('ldX'), 1])
+    Wb = tvm.decl_buffer(W.shape, W.dtype,
+                         name="Wb",
+                         offset_factor=K,
+                         strides=[tvm.var('ldW'), 1])
 
     def _intrin_func(ins, outs):
-        ww, xx = ins
+        xx, ww = ins
         zz = outs[0]
-        vpadd = "llvm.arm.neon.vpadd.v8u8"
-        vpadalu = "llvm.arm.neon.vpadalu.v16u8.v8u16"
-        args_1 = tvm.const(1, 'uint32')
-        args_2 = tvm.const(2, 'uint32')
+        # vpadd = "llvm.arm.neon.vpadd.v8u8"
+        # vpadalu = "llvm.arm.neon.vmlal.v4i32.v8i16"
+        # args_1 = tvm.const(1, 'uint32')
+        # args_2 = tvm.const(2, 'uint32')
 
         def _instr(index):
             irb = tvm.ir_builder.create()
             if index == 1:
-                irb.emit(zz.vstore(0, tvm.const(0, 'uint16x8')))
+                irb.emit(zz.vstore([0, 0], tvm.const(0, 'int8x8')))
+                irb.emit(zz.vstore([1, 0], tvm.const(0, 'int8x8')))
+                irb.emit(zz.vstore([2, 0], tvm.const(0, 'int8x8')))
+                irb.emit(zz.vstore([3, 0], tvm.const(0, 'int8x8')))
                 return irb.get()
 
-            cnts8 = [None] * 8
-            cnts4 = [None] * 4
-            cnts2 = [None] * 2
-            for bw in range(w_b):
-                for bx in range(x_b):
-                    if k_i == 16:
-                        for i in range(m):
-                            ands = ww.vload([bw, i, 0], 'uint8x16') & xx.vload([bx, 0], 'uint8x16')
-                            cnts = tvm.popcount(ands)
-                            upper_half = tvm.call_pure_intrin('uint8x8', 'vectorhigh', cnts)
-                            lower_half = tvm.call_pure_intrin('uint8x8', 'vectorlow', cnts)
-                            cnts8[i] = upper_half + lower_half
-                        for i in range(m//2):
-                            cnts4[i] = tvm.call_llvm_intrin('uint8x8', vpadd,
-                                                            args_1, cnts8[i*2], cnts8[i*2+1])
-                        for i in range(m//4):
-                            cnts2[i] = tvm.call_llvm_intrin('uint8x8', vpadd,
-                                                            args_1, cnts4[i*2], cnts4[i*2+1])
-                        cnts = tvm.call_pure_intrin('uint8x16', 'vectorcombine', cnts2[0], cnts2[1])
-                        shifted_cnts = cnts << tvm.const(bw+bx, dtype)
-                        out = tvm.call_llvm_intrin('uint16x8', vpadalu,
-                                                   args_2, zz.vload(0, 'uint16x8'), shifted_cnts)
-                    else: # ki == 8
-                        for i in range(m):
-                            ands = ww.vload([bw, i, 0], 'uint8x8') & xx.vload([bx, 0], 'uint8x8')
-                            cnts8[i] = tvm.popcount(ands)
-                        for i in range(m//2):
-                            cnts4[i] = tvm.call_llvm_intrin('uint8x8', vpadd,
-                                                            args_1, cnts8[i*2], cnts8[i*2+1])
-                        for i in range(m//4):
-                            cnts2[i] = tvm.call_llvm_intrin('uint8x8', vpadd,
-                                                            args_1, cnts4[i*2], cnts4[i*2+1])
-                        cnts = tvm.call_pure_intrin('uint8x16', 'vectorcombine', cnts2[0], cnts2[1])
-                        shifted_cnts = cnts << tvm.const(bw+bx, dtype)
-                        out = tvm.call_llvm_intrin('uint16x8', vpadalu,
-                                                   args_2, zz.vload(0, 'uint16x8'), shifted_cnts)
-                    irb.emit(zz.vstore(0, out))
+
+            accs = [(tvm.const(0, 'int32x4'), (tvm.const(0, 'int32x4')))] * 4
+            assert K % 8 == 0
+            for k in range(0, K, 8):
+                va0 = xx.vload([0, k], 'int8x8').astype('int16x8')
+                va1 = xx.vload([1, k], 'int8x8').astype('int16x8')
+                va2 = xx.vload([2, k], 'int8x8').astype('int16x8')
+                va3 = xx.vload([3, k], 'int8x8').astype('int16x8')
+
+                vxb = ww.vload([k, 0], 'int8x8').astype('int16x8')
+
+                def vl(x):
+                    return tvm.call_pure_intrin('int16x4', 'vectorlow', x)
+
+                def vh(x):
+                    return tvm.call_pure_intrin('int16x4', 'vectorhigh', x)
+
+
+                accs[0][0] = accs[0][0] + vl(vxb).astype('int32x4') * (vl(va0)[0]).astype("int32x4")
+                accs[0][1] = accs[0][1] + vh(vxb).astype('int32x4') * (vl(va0)[0]).astype("int32x4")
+                accs[1][0] = accs[1][0] + vl(vxb).astype('int32x4') * (vl(va1)[0]).astype("int32x4")
+                accs[1][1] = accs[1][1] + vh(vxb).astype('int32x4') * (vl(va1)[0]).astype("int32x4")
+                accs[2][0] = accs[2][0] + vl(vxb).astype('int32x4') * (vl(va2)[0]).astype("int32x4")
+                accs[2][1] = accs[2][1] + vh(vxb).astype('int32x4') * (vl(va2)[0]).astype("int32x4")
+                accs[3][0] = accs[3][0] + vl(vxb).astype('int32x4') * (vl(va3)[0]).astype("int32x4")
+                accs[3][1] = accs[3][1] + vh(vxb).astype('int32x4') * (vl(va3)[0]).astype("int32x4")
+
+
+            irb.emit(zz.vstore([0, 0], accs[0][0]))
+            irb.emit(zz.vstore([0, 4], accs[0][1]))
+            irb.emit(zz.vstore([1, 0], accs[1][0]))
+            irb.emit(zz.vstore([1, 4], accs[1][1]))
+            irb.emit(zz.vstore([2, 0], accs[2][0]))
+            irb.emit(zz.vstore([2, 4], accs[2][1]))
+            irb.emit(zz.vstore([3, 0], accs[3][0]))
+            irb.emit(zz.vstore([3, 4], accs[3][1]))
+
             return irb.get()
         # body, reset, update
         return _instr(0), _instr(1), _instr(2)
     with tvm.build_config(offset_factor=1, partition_const_loop=True):
-        return tvm.decl_tensor_intrin(z.op, _intrin_func, binds={w: Wb, x:Xb})
+        return tvm.decl_tensor_intrin(Z.op, _intrin_func, binds={X: Xb, W:Wb})
 
 
 def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
@@ -396,13 +398,13 @@ WORKLOADS = [
         # # # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
     # Workload(space=64, input_channel=a(64), output_channel=a(64), kernel=3, pad=1, stride=1),
     # Workload(space=96, input_channel=a(32), output_channel=a(16), kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=a(12), output_channel=a(24), kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=a(24), output_channel=a(48), kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=a(48), output_channel=a(96), kernel=3, pad=1, stride=1),
-        Workload(space=12, input_channel=a(96), output_channel=a(180), kernel=3, pad=1, stride=1),
-        Workload(space=6, input_channel=a(180), output_channel=a(220), kernel=3, pad=1, stride=1),
-        Workload(space=6, input_channel=a(220), output_channel=a(180), kernel=3, pad=1, stride=1),
-        Workload(space=12, input_channel=a(180), output_channel=a(96), kernel=3, pad=1, stride=1),
+        # Workload(space=96, input_channel=a(12), output_channel=a(24), kernel=3, pad=1, stride=1),
+        # Workload(space=48, input_channel=a(24), output_channel=a(48), kernel=3, pad=1, stride=1),
+        # Workload(space=24, input_channel=a(48), output_channel=a(96), kernel=3, pad=1, stride=1),
+        # Workload(space=12, input_channel=a(96), output_channel=a(180), kernel=3, pad=1, stride=1),
+        # Workload(space=6, input_channel=a(180), output_channel=a(220), kernel=3, pad=1, stride=1),
+        # Workload(space=6, input_channel=a(220), output_channel=a(180), kernel=3, pad=1, stride=1),
+        # Workload(space=12, input_channel=a(180), output_channel=a(96), kernel=3, pad=1, stride=1),
         Workload(space=24, input_channel=a(96), output_channel=a(48), kernel=3, pad=1, stride=1),
         Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
         Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),

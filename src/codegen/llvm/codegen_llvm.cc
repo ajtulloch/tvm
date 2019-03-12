@@ -698,6 +698,17 @@ llvm::Value* CodeGenLLVM::CreateIntrinsic(const Call* op) {
       indices.push_back(i);
     }
     return builder_->CreateShuffleVector(v0, v1, indices);
+  } else if (op->is_intrinsic("vectorindex")) {
+    llvm::Value* v0 = MakeValue(op->args[0]);
+    unsigned v1 = op->args[1].as<IntImm>()->value;
+    int num_elems = static_cast<int>(v0->getType()->getVectorNumElements());
+    std::vector<unsigned> indices;
+    for (int i = 0; i < num_elems; ++i) {
+      indices.push_back(v1);
+    }
+    llvm::Constant* undef = llvm::UndefValue::get(v0->getType());
+    CHECK(undef);
+    return builder_->CreateShuffleVector(v0, undef, indices);
   } else {
     LOG(FATAL) << "unknown intrinsic " << op->name;
     return nullptr;

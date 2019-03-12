@@ -33,13 +33,17 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VLD1.8 {d5}, [%[a2]]!\n\t"
                " VLD1.8 {d7}, [%[a3]]!\n\t"
                // Load b0
+               " VLD1.8 {d9}, [%[b]]!\n\t"
+
                " VMOVL.S8 q0, d1\n\t"
                " VMOVL.S8 q1, d3\n\t"
                " VMOVL.S8 q2, d5\n\t"
                " VMOVL.S8 q3, d7\n\t"
 
-               " VLD1.8 {d9}, [%[b]]!\n\t"
                " VMOVL.S8 q4, d9\n\t"
+
+               // Load b1
+               " VLD1.8 {d11}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d8, d0[0]\n\t"
                " VMLAL.S16 q9, d9, d0[0]\n\t"
@@ -47,12 +51,12 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d9, d2[0]\n\t"
                " VMLAL.S16 q12, d8, d4[0]\n\t"
                " VMLAL.S16 q13, d9, d4[0]\n\t"
+               " VMOVL.S8 q5, d11\n\t"
                " VMLAL.S16 q14, d8, d6[0]\n\t"
                " VMLAL.S16 q15, d9, d6[0]\n\t"
 
-               // Load b1
-               " VLD1.8 {d11}, [%[b]]!\n\t"
-               " VMOVL.S8 q5, d11\n\t"
+               // Load b2
+               " VLD1.8 {d9}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d10, d0[1]\n\t"
                " VMLAL.S16 q9, d11, d0[1]\n\t"
@@ -60,12 +64,14 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d11, d2[1]\n\t"
                " VMLAL.S16 q12, d10, d4[1]\n\t"
                " VMLAL.S16 q13, d11, d4[1]\n\t"
+
+               " VMOVL.S8 q4, d9\n\t"
+
                " VMLAL.S16 q14, d10, d6[1]\n\t"
                " VMLAL.S16 q15, d11, d6[1]\n\t"
 
-               // Load b2
-               " VLD1.8 {d9}, [%[b]]!\n\t"
-               " VMOVL.S8 q4, d9\n\t"
+               // Load b3
+               " VLD1.8 {d11}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d8, d0[2]\n\t"
                " VMLAL.S16 q9, d9, d0[2]\n\t"
@@ -73,12 +79,12 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d9, d2[2]\n\t"
                " VMLAL.S16 q12, d8, d4[2]\n\t"
                " VMLAL.S16 q13, d9, d4[2]\n\t"
+               " VMOVL.S8 q5, d11\n\t"
                " VMLAL.S16 q14, d8, d6[2]\n\t"
                " VMLAL.S16 q15, d9, d6[2]\n\t"
 
-               // Load b3
-               " VLD1.8 {d11}, [%[b]]!\n\t"
-               " VMOVL.S8 q5, d11\n\t"
+               // Load b4
+               " VLD1.8 {d9}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d10, d0[3]\n\t"
                " VMLAL.S16 q9, d11, d0[3]\n\t"
@@ -86,12 +92,15 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d11, d2[3]\n\t"
                " VMLAL.S16 q12, d10, d4[3]\n\t"
                " VMLAL.S16 q13, d11, d4[3]\n\t"
+
+               " VMOVL.S8 q4, d9\n\t"
+
                " VMLAL.S16 q14, d10, d6[3]\n\t"
                " VMLAL.S16 q15, d11, d6[3]\n\t"
 
-               // Load b4
-               " VLD1.8 {d9}, [%[b]]!\n\t"
-               " VMOVL.S8 q4, d9\n\t"
+
+               // Load b5
+               " VLD1.8 {d11}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d8, d1[0]\n\t"
                " VMLAL.S16 q9, d9, d1[0]\n\t"
@@ -99,12 +108,14 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d9, d3[0]\n\t"
                " VMLAL.S16 q12, d8, d5[0]\n\t"
                " VMLAL.S16 q13, d9, d5[0]\n\t"
+
+               " VMOVL.S8 q5, d11\n\t"
+
                " VMLAL.S16 q14, d8, d7[0]\n\t"
                " VMLAL.S16 q15, d9, d7[0]\n\t"
 
-               // Load b5
-               " VLD1.8 {d11}, [%[b]]!\n\t"
-               " VMOVL.S8 q5, d11\n\t"
+               // Load b6
+               " VLD1.8 {d9}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d10, d1[1]\n\t"
                " VMLAL.S16 q9, d11, d1[1]\n\t"
@@ -112,12 +123,14 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d11, d3[1]\n\t"
                " VMLAL.S16 q12, d10, d5[1]\n\t"
                " VMLAL.S16 q13, d11, d5[1]\n\t"
+
+               " VMOVL.S8 q4, d9\n\t"
+
                " VMLAL.S16 q14, d10, d7[1]\n\t"
                " VMLAL.S16 q15, d11, d7[1]\n\t"
 
-               // Load b6
-               " VLD1.8 {d9}, [%[b]]!\n\t"
-               " VMOVL.S8 q4, d9\n\t"
+               // Load b7
+               " VLD1.8 {d11}, [%[b]]!\n\t"
 
                " VMLAL.S16 q8, d8, d1[2]\n\t"
                " VMLAL.S16 q9, d9, d1[2]\n\t"
@@ -125,12 +138,11 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
                " VMLAL.S16 q11, d9, d3[2]\n\t"
                " VMLAL.S16 q12, d8, d5[2]\n\t"
                " VMLAL.S16 q13, d9, d5[2]\n\t"
+
+               " VMOVL.S8 q5, d11\n\t"
+
                " VMLAL.S16 q14, d8, d7[2]\n\t"
                " VMLAL.S16 q15, d9, d7[2]\n\t"
-
-               // Load b7
-               " VLD1.8 {d11}, [%[b]]!\n\t"
-               " VMOVL.S8 q5, d11\n\t"
 
                " VMLAL.S16 q8, d10, d1[3]\n\t"
                " VMLAL.S16 q9, d11, d1[3]\n\t"

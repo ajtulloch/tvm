@@ -235,6 +235,8 @@ void CodeGenLLVM::InitPassManagerBuilder(llvm::PassManagerBuilder* builder) {
 
 void CodeGenLLVM::Optimize() {
   // pass manager
+  // static std::vector<const char*> args{"tvm", "-print-after-all"};
+  // llvm::cl::ParseCommandLineOptions(args.size(), args.data());
   FPassManager fpass(module_.get());
   MPassManager mpass;
   mpass.add(llvm::createTargetTransformInfoWrapperPass(

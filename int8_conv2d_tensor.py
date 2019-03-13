@@ -89,34 +89,35 @@ def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride,
     n, coo, oh, ow, vc = cfg.axis(N), cfg.axis(COO), cfg.axis(OH), cfg.axis(OW), cfg.axis(VC)
     cii, ciii, kh, kw = cfg.reduce_axis(CII), cfg.reduce_axis(CIII), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
 
+    # oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2, filter=lambda x: x.size[-1] == 4)
     oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2)
     VH = cfg["tile_oh"].size[-1]
     VW = 4 # cfg["tile_ow"].size[-1]
     vw = cfg.axis(VW)
     # ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] == 4)
 
-    cfg.define_reorder("reorder_0",
-                       [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
-                       policy='candidate', candidate=[
-                           # [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
-                           [n, coo, cii, oh, ow, kh, kw, ciii, vh, vw, vc],
-                           [n, coo, cii, oh, ow, kh, kw, vh, ciii, vw, vc],
-                           [n, coo, oh, ow, cii, kh, kw, ciii, vh, vw, vc],
-                           # [n, coo, cii, oh, ow, kh, kw, vc, vh, ciii, vw],
-                           # [n, coo, cii, oh, ow, kh, kw, ciii, vh, vc, vw],
-                           # [n, coo, oh, cii, ow, kh, kw, ciii, vh, vw, vc],
-                       ])
+    # cfg.define_reorder("reorder_0",
+    #                    [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
+    #                    policy='candidate', candidate=[
+    #                        # [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
+    #                        [n, coo, cii, oh, ow, kh, kw, ciii, vh, vw, vc],
+    #                        [n, coo, cii, oh, ow, kh, kw, vh, ciii, vw, vc],
+    #                        [n, coo, oh, ow, cii, kh, kw, ciii, vh, vw, vc],
+    #                        # [n, coo, cii, oh, ow, kh, kw, vc, vh, ciii, vw],
+    #                        # [n, coo, cii, oh, ow, kh, kw, ciii, vh, vc, vw],
+    #                        # [n, coo, oh, cii, ow, kh, kw, ciii, vh, vw, vc],
+    #                    ])
 
-    cfg.define_reorder("reorder_1",
-                       [n, coo, oh, ow, vh, vw, vc],
-                       policy='candidate', candidate=[
-                           [n, coo, oh, ow, vh, vw, vc],
-                           [n, coo, oh, ow, vc, vh, vw],
-                           [n, coo, oh, ow, vh, vc, vw]
-                       ])
+    # cfg.define_reorder("reorder_1",
+    #                    [n, coo, oh, ow, vh, vw, vc],
+    #                    policy='candidate', candidate=[
+    #                        [n, coo, oh, ow, vh, vw, vc],
+    #                        [n, coo, oh, ow, vc, vh, vw],
+    #                        [n, coo, oh, ow, vh, vc, vw]
+    #                    ])
 
-    cfg.define_annotate("ann_reduce", [kh, kw, ciii], policy='try_unroll')
-    cfg.define_annotate("ann_spatial", [vc], policy='try_vec')
+    # cfg.define_annotate("ann_reduce", [kh, kw, ciii], policy='try_unroll')
+    # cfg.define_annotate("ann_spatial", [vc], policy='try_vec')
     # cfg.define_annotate("ann_spatial", [vh, vw, vc], policy='try_unroll_vec')
 
     # fallback support
@@ -131,7 +132,6 @@ def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride,
 
     assert VW == 4
     assert VC == 8
-    print(OW, VW)
     assert OW % VW == 0
     # input            = (N, CII, IH, IW, CIII)
     # -> transpose
@@ -218,7 +218,6 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
     s[data_pad].vectorize(ciii)
 
     CIII = get_const_int(ciii.dom.extent)
-    print(CIII)
     (n, h, w, vh, vw, cii_kh_kw_ciii) = s[data_vec].op.axis
     (cii_kh_kw, ciii) = s[data_vec].split(cii_kh_kw_ciii, CIII)
     (cii_kh, kw) = s[data_vec].split(cii_kh_kw, 3)
@@ -226,15 +225,27 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
     s[data_vec].vectorize(ciii)
     s[data_vec].unroll(kh)
     s[data_vec].unroll(kw)
+
+    cfg.define_knob('data_pad_compute_at', [0, 1, 2])
+    if cfg['data_pad_compute_at'].val == 2:
+        s[data_pad].compute_inline()
+    else:
+        s[data_pad].compute_at(s[data_vec], [h, vh][cfg['data_pad_compute_at'].val])
+
     (n, coo, h, w, vh, vw, vc) = s[conv].op.axis
     (cii_kh_kw_ciii, ) = s[conv].op.reduce_axis
-    s[conv].reorder(n, coo, h, w, vh, cii_kh_kw_ciii, vw, vc)
+    s[conv].reorder(n, coo, h, w, vh, vw, cii_kh_kw_ciii, vc)
     K = get_const_int(cii_kh_kw_ciii.dom.extent)
-    print(K)
-    s[conv].tensorize(vh, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
+    s[conv].tensorize(vw, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
+
+    cfg.define_knob('data_vec_compute_at', [0, 1, 2])
+    s[data_vec].compute_at(s[conv], [n, h, w][cfg['data_vec_compute_at'].val])
+
     (n, coo, h, w, vc) = s[output].op.axis
-    s[conv].compute_at(s[output], h)
+    cfg.define_knob('conv_compute_at', [0, 1])
+    s[conv].compute_at(s[output], [h, coo][cfg['conv_compute_at'].val])
     s[output].vectorize(vc)
+
     # if cfg['data_pad_inline'].val == 1 and has_padding:
     #     s[data_pad].compute_inline()
     # if cfg['data_pad_inline'].val == 2 and has_padding:
@@ -319,8 +330,8 @@ def conv2d_NCHWc_direct_autotvm(s, ic, oc, kernel, pad, stride):
     # ic = ((ic + 16 - 1) // 16) * 16
     # oc = ((oc + 16 - 1) // 16) * 16
     cfg = autotvm.get_config()
-    cfg.define_knob('BNInput', [8, 16]) # TODO, 8, 16
-    cfg.define_knob('BNOutput', [8, 16]) # TODO 8, 16
+    cfg.define_knob('BNInput', [8, 16, 32]) # TODO, 8, 16
+    cfg.define_knob('BNOutput', [8]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
     X = tvm.placeholder(shape=(1, ic // BNInput, s, s, BNInput), dtype="int8", name="X")
@@ -422,8 +433,8 @@ WORKLOADS = [
         # Workload(space=6, input_channel=a(220), output_channel=a(180), kernel=3, pad=1, stride=1),
         # Workload(space=12, input_channel=a(180), output_channel=a(96), kernel=3, pad=1, stride=1),
         Workload(space=24, input_channel=a(96), output_channel=a(48), kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
+        # Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
+        # Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
         # Workload(space=192, input_channel=a(12), output_channel=a(1), kernel=3, pad=1, stride=1),
         # Workload(space=192, input_channel=a(1), output_channel=a(1), kernel=3, pad=1, stride=1),
 ]

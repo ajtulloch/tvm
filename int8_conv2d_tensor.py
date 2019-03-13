@@ -237,13 +237,21 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
     s[conv].reorder(n, coo, h, w, vh, vw, cii_kh_kw_ciii, vc)
     K = get_const_int(cii_kh_kw_ciii.dom.extent)
     s[conv].tensorize(vw, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
+    s[conv].unroll(vh)
 
     cfg.define_knob('data_vec_compute_at', [0, 1, 2])
     s[data_vec].compute_at(s[conv], [n, h, w][cfg['data_vec_compute_at'].val])
 
     (n, coo, h, w, vc) = s[output].op.axis
-    cfg.define_knob('conv_compute_at', [0, 1])
-    s[conv].compute_at(s[output], [h, coo][cfg['conv_compute_at'].val])
+    VW = get_const_int(vw.dom.extent)
+    assert VW == 4
+    VH = get_const_int(vh.dom.extent)
+    (w, vw) = s[output].split(w, VW)
+    (h, vh) = s[output].split(h, VH)
+    s[output].reorder(n, coo, h, vh, w, vw, vc)
+    cfg.define_knob('conv_compute_at', [0, 1, 2])
+    s[conv].compute_at(s[output], [vh, w, coo][cfg['conv_compute_at'].val])
+    s[output].unroll(vw)
     s[output].vectorize(vc)
 
     # if cfg['data_pad_inline'].val == 1 and has_padding:
@@ -340,7 +348,7 @@ def conv2d_NCHWc_direct_autotvm(s, ic, oc, kernel, pad, stride):
     Y = _decl_spatial_pack_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="int32")
     s = tvm.create_schedule([Y.op])
     s = _schedule_spatial_pack_NCHWc(cfg, s, Y, Y)
-    print(tvm.lower(s, [X, W, Y], simple_mode=True))
+    # print(tvm.lower(s, [X, W, Y], simple_mode=True))
     return s, [X, W, Y]
 
 
@@ -425,18 +433,18 @@ WORKLOADS = [
         # # # Workload(space=12, input_channel=256, output_channel=256, kernel=3, pad=1, stride=1),
     # Workload(space=64, input_channel=a(64), output_channel=a(64), kernel=3, pad=1, stride=1),
     # Workload(space=96, input_channel=a(32), output_channel=a(16), kernel=3, pad=1, stride=1),
-        # Workload(space=96, input_channel=a(12), output_channel=a(24), kernel=3, pad=1, stride=1),
-        # Workload(space=48, input_channel=a(24), output_channel=a(48), kernel=3, pad=1, stride=1),
-        # Workload(space=24, input_channel=a(48), output_channel=a(96), kernel=3, pad=1, stride=1),
-        # Workload(space=12, input_channel=a(96), output_channel=a(180), kernel=3, pad=1, stride=1),
-        # Workload(space=6, input_channel=a(180), output_channel=a(220), kernel=3, pad=1, stride=1),
-        # Workload(space=6, input_channel=a(220), output_channel=a(180), kernel=3, pad=1, stride=1),
-        # Workload(space=12, input_channel=a(180), output_channel=a(96), kernel=3, pad=1, stride=1),
+        Workload(space=96, input_channel=a(12), output_channel=a(24), kernel=3, pad=1, stride=1),
+        Workload(space=48, input_channel=a(24), output_channel=a(48), kernel=3, pad=1, stride=1),
+        Workload(space=24, input_channel=a(48), output_channel=a(96), kernel=3, pad=1, stride=1),
+        Workload(space=12, input_channel=a(96), output_channel=a(180), kernel=3, pad=1, stride=1),
+        Workload(space=6, input_channel=a(180), output_channel=a(220), kernel=3, pad=1, stride=1),
+        Workload(space=6, input_channel=a(220), output_channel=a(180), kernel=3, pad=1, stride=1),
+        Workload(space=12, input_channel=a(180), output_channel=a(96), kernel=3, pad=1, stride=1),
         Workload(space=24, input_channel=a(96), output_channel=a(48), kernel=3, pad=1, stride=1),
-        # Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
-        # Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
-        # Workload(space=192, input_channel=a(12), output_channel=a(1), kernel=3, pad=1, stride=1),
-        # Workload(space=192, input_channel=a(1), output_channel=a(1), kernel=3, pad=1, stride=1),
+        Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
+        Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=a(12), output_channel=a(1), kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=a(1), output_channel=a(1), kernel=3, pad=1, stride=1),
 ]
 
 target = tvm.target.arm_cpu("rasp3b")# 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
@@ -444,9 +452,9 @@ local_target = 'llvm -mcpu=core-avx2'
 
 @click.command()
 @click.option('--autotvm_number', default=10)
-@click.option('--autotvm_repeat', default=2)
-@click.option('--autotvm_n_trial', default=200)
-@click.option('--autotvm_early_stopping', default=100)
+@click.option('--autotvm_repeat', default=5)
+@click.option('--autotvm_n_trial', default=1000)
+@click.option('--autotvm_early_stopping', default=1000)
 @click.option('--autotvm_log', default="autotvm_direct_benchmark.log", type=str)
 @click.option('--layout', type=click.Choice(["NCHW", "NCHWc"]), required=True)
 @click.option('--tracker_port', default=9195)
@@ -469,6 +477,7 @@ def run(layout,
                 'rpi', '0.0.0.0', tracker_port,
                 number=autotvm_number,
                 repeat=autotvm_repeat,
+                min_repeat_ms=1000,
                 timeout=80) if not local else
             autotvm.LocalRunner(
                 timeout=80,

@@ -18,7 +18,8 @@ def intrin_4x8_gemm_neon_ir():
     import os
     src = open(os.path.expanduser("~/src/tvm/fb/gemm_int8_aarch32_asm.cc")).read()
     from tvm.contrib import clang
-    return clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf", "-mcpu=cortex-a53", "--sysroot=~/src/panda/usr/include/"])
+    z = clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf", "-mcpu=cortex-a53", "--sysroot=~/src/panda/usr/include/"], output="/tmp/x.ll")
+    return "/tmp/x.ll"
 
 # M == 4 input width
 # N == 8 output channels.
@@ -71,47 +72,48 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
         return tvm.decl_tensor_intrin(Z.op, _intrin_func, binds={X: Xb, W:Wb, Z: Zb})
 
 
-def _decl_spatial_pack_NHWC(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
+def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
     wkl = None
     out_dtype = out_dtype or data.dtype
-    N, IH, IW, CI = get_const_tuple(data.shape)
-    CO, KH, KW, CI_ = get_const_tuple(kernel.shape)
-    assert CI_ == CI
+    N, CII, IH, IW, CIII = get_const_tuple(data.shape)
+    COO, CII, KH, KW, CIII_, VC = get_const_tuple(kernel.shape)
 
     pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (KH, KW))
     HSTR, WSTR = stride if isinstance(stride, (tuple, list)) else (stride, stride)
 
     OH = (IH + pad_top + pad_bottom - KH) // HSTR + 1
     OW = (IW + pad_left + pad_right - KW) // WSTR + 1
-    assert pad_top == 0 and pad_left == 0
-    data_pad = data #pad(data, [0, 0, pad_top, pad_left, 0], [0, 0, pad_bottom, pad_right, 0], name="data_pad")
+    data_pad = pad(data, [0, 0, pad_top, pad_left, 0], [0, 0, pad_bottom, pad_right, 0], name="data_pad")
 
     # ==================== define configuration space ====================
-    n, oh, ow, co = cfg.axis(N), cfg.axis(), cfg.axis(OH), cfg.axis(OW), cfg.axis(CO)
-    ci, kh, kw = cfg.reduce_axis(CI), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
+    n, coo, oh, ow, vc = cfg.axis(N), cfg.axis(COO), cfg.axis(OH), cfg.axis(OW), cfg.axis(VC)
+    cii, ciii, kh, kw = cfg.reduce_axis(CII), cfg.reduce_axis(CIII), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
 
-    ow, vow = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] <= 4)
-    co, vco = cfg.define_split('tile_co', co, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
+    oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2)
+    VH = cfg["tile_oh"].size[-1]
+    VW = 4 # cfg["tile_ow"].size[-1]
+    vw = cfg.axis(VW)
+    # ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] == 4)
 
-    # cfg.define_reorder("reorder_0",
-    #                    [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
-    #                    policy='candidate', candidate=[
-    #                        # [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
-    #                        [n, coo, cii, oh, ow, kh, kw, ciii, vh, vw, vc],
-    #                        [n, coo, cii, oh, ow, kh, kw, vh, ciii, vw, vc],
-    #                        [n, coo, oh, ow, cii, kh, kw, ciii, vh, vw, vc],
-    #                        # [n, coo, cii, oh, ow, kh, kw, vc, vh, ciii, vw],
-    #                        # [n, coo, cii, oh, ow, kh, kw, ciii, vh, vc, vw],
-    #                        # [n, coo, oh, cii, ow, kh, kw, ciii, vh, vw, vc],
-    #                    ])
+    cfg.define_reorder("reorder_0",
+                       [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
+                       policy='candidate', candidate=[
+                           # [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
+                           [n, coo, cii, oh, ow, kh, kw, ciii, vh, vw, vc],
+                           [n, coo, cii, oh, ow, kh, kw, vh, ciii, vw, vc],
+                           [n, coo, oh, ow, cii, kh, kw, ciii, vh, vw, vc],
+                           # [n, coo, cii, oh, ow, kh, kw, vc, vh, ciii, vw],
+                           # [n, coo, cii, oh, ow, kh, kw, ciii, vh, vc, vw],
+                           # [n, coo, oh, cii, ow, kh, kw, ciii, vh, vw, vc],
+                       ])
 
-    # cfg.define_reorder("reorder_1",
-    #                    [n, coo, oh, ow, vh, vw, vc],
-    #                    policy='candidate', candidate=[
-    #                        [n, coo, oh, ow, vh, vw, vc],
-    #                        [n, coo, oh, ow, vc, vh, vw],
-    #                        [n, coo, oh, ow, vh, vc, vw]
-    #                    ])
+    cfg.define_reorder("reorder_1",
+                       [n, coo, oh, ow, vh, vw, vc],
+                       policy='candidate', candidate=[
+                           [n, coo, oh, ow, vh, vw, vc],
+                           [n, coo, oh, ow, vc, vh, vw],
+                           [n, coo, oh, ow, vh, vc, vw]
+                       ])
 
     cfg.define_annotate("ann_reduce", [kh, kw, ciii], policy='try_unroll')
     cfg.define_annotate("ann_spatial", [vc], policy='try_vec')
@@ -127,9 +129,10 @@ def _decl_spatial_pack_NHWC(cfg, data, kernel, num_filter, kernel_size, stride, 
     #         cfg.fallback_with_reference_log(ref_log)
     # ====================================================================
 
-    VH = cfg["tile_oh"].size[-1]
-    VW = cfg["tile_ow"].size[-1]
-
+    assert VW == 4
+    assert VC == 8
+    print(OW, VW)
+    assert OW % VW == 0
     # input            = (N, CII, IH, IW, CIII)
     # -> transpose
     ############################################################
@@ -139,36 +142,51 @@ def _decl_spatial_pack_NHWC(cfg, data, kernel, num_filter, kernel_size, stride, 
     # -> transpose
     # O_shape          = (N, COO, OH, OW, COOO)
 
-    dvshape = (N, CII, OH // VH, OW // VW, VH*HSTR + KH-1, VW*WSTR + KW-1, CIII)
+
+    # dvshape = (N, CII, OH // VH, OW // VW, VH*HSTR + KH-1, VW*WSTR + KW-1, CIII)
+    # ovshape = (N, COO, OH // VH, OW // VW, VH, VW, VC)
+    # oshape = (N, COO, OH, OW, VC)
+
+    dvshape = (N, OH // VH, OW // VW, VH, VW, CII * KH * KW * CIII)
+    kvshape = (COO, CII * KH * KW * CIII, VC)
     ovshape = (N, COO, OH // VH, OW // VW, VH, VW, VC)
     oshape = (N, COO, OH, OW, VC)
 
-    data_vec = tvm.compute(dvshape, lambda n, cii, h, w, vh, vw, ciii:
-                           data_pad[n][cii][h*VH*HSTR+vh][w*VW*WSTR+vw][ciii],
-                           name='data_vec')
+    def data_vec_compute(n, h, w, vh, vw, cii_kh_kw_ciii):
+        ciii = cii_kh_kw_ciii % CIII
+        kh = (cii_kh_kw_ciii // CIII) % KW
+        kw = (cii_kh_kw_ciii // CIII) // KW
+        kh = ((cii_kh_kw_ciii // CIII) // KW) % KH
+        cii = (((cii_kh_kw_ciii // CIII) // KW) // KH)
+        return data_pad[n][cii][h * VH * HSTR + vh + kh][w * VW * WSTR + vw + kw][ciii]
+    data_vec = tvm.compute(dvshape, data_vec_compute, name='data_vec')
 
-    cii = tvm.reduce_axis((0, CII), name='cii')
-    ciii = tvm.reduce_axis((0, CIII), name='ciii')
-    kh = tvm.reduce_axis((0, KH), name='kh')
-    kw = tvm.reduce_axis((0, KW), name='kw')
+    def kernel_vec_compute(coo, cii_kh_kw_ciii, vc):
+        ciii = cii_kh_kw_ciii % CIII
+        kh = (cii_kh_kw_ciii // CIII) % KW
+        kw = (cii_kh_kw_ciii // CIII) // KW
+        kh = ((cii_kh_kw_ciii // CIII) // KW) % KH
+        cii = (((cii_kh_kw_ciii // CIII) // KW) // KH)
+        return kernel[coo][cii][kh][kw][ciii][vc]
+    kernel_vec = tvm.compute(kvshape, kernel_vec_compute, name='kernel_vec')
 
-    # conv = tvm.compute(ovshape, lambda n, coo, h, w, vh, vw, vc: \
-    #     tvm.sum((data_vec[n, cii, h, w, vh*HSTR+kh, vw*WSTR+kw, ciii].astype("int16") - tvm.const(12, dtype="int16")).astype("int32") *
-    #             (kernel[coo, cii, kh, kw, ciii, vc].astype("int16") - tvm.const(71, dtype="int16")).astype("int32"),
-    #             axis=[cii, ciii, kh, kw]), name='conv')
+    cii_kh_kw_ciii = tvm.reduce_axis((0, CII * KH * KW * CIII), name='cii_kh_kw_ciii')
 
-    conv = tvm.compute(ovshape, lambda n, coo, h, w, vh, vw, vc: \
-        tvm.sum((data_vec[n, cii, h, w, vh*HSTR+kh, vw*WSTR+kw, ciii]).astype("int32") *
-                (kernel[coo, cii, kh, kw, ciii, vc]).astype("int32"),
-                axis=[cii, ciii, kh, kw]), name='conv')
+    conv = tvm.compute(
+        ovshape,
+        lambda n, coo, h, w, vh, vw, vc: tvm.sum(
+            data_vec[n, h, w, vh, vw, cii_kh_kw_ciii].astype("int32") *
+            kernel_vec[coo, cii_kh_kw_ciii, vc].astype("int32"),
+            axis=[cii_kh_kw_ciii]
+        ),
+        name='conv')
 
-    def rq(x):
-        x_int16 = (x >> 5).astype("int16")
-        x_int8 = (x_int16 >> 6).astype("int8")
-        return tvm.max(tvm.min(x_int8, tvm.const(124, dtype="int8")), tvm.const(4, dtype="int8"))
-    output = tvm.compute(oshape, lambda n, coo, h, w, vc: rq(conv[n][coo][h//VH][w//VW][h%VH][w%VW][vc]),
-                         name='output_unpack', tag='spatial_conv2d_output')
-    assert output.dtype == "int8"
+    output = tvm.compute(
+        oshape,
+        lambda n, coo, h, w, vc: conv[n][coo][h // VH][w // VW][h % VH][w % VW][vc],
+        name='output_unpack', tag='spatial_conv2d_output'
+    )
+    assert output.dtype == "int32"
     flops = 2 * N * COO * OH * OW * VC * KH * KW * CII * CIII
     cfg.add_flop(flops)
     return output
@@ -183,94 +201,115 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
     # s[data_pad].compute_inline()
 
     kernel_vec = conv.op.input_tensors[1]
-    n, coo, oh, ow, vh, vw, vc = s[conv].op.axis
-    _, dvcii, dvoh, dvow, dvvh, dvvw, dvciii = s[data_vec].op.axis
-    cii, ciii, kh, kw = s[conv].op.reduce_axis
-    data_pad = data_vec.op.input_tensors[0]
-    if data_pad.op.name == "data_pad":
-        assert type(data_pad.op) == tvm.tensor.ComputeOp
-        has_padding = True
-    else:
-        pass
-        assert type(data_pad.op) == tvm.tensor.PlaceholderOp
-        has_padding = False
-    cfg.define_knob('data_pad_inline', [0, 1, 2, 3, 4])
+    # n, coo, oh, ow, vh, vw, vc = s[conv].op.axis
+    # _, dvcii, dvoh, dvow, dvvh, dvvw, dvciii = s[data_vec].op.axis
+    # cii, ciii, kh, kw = s[conv].op.reduce_axis
+    # data_pad = data_vec.op.input_tensors[0]
+    # if data_pad.op.name == "data_pad":
+    #     assert type(data_pad.op) == tvm.tensor.ComputeOp
+    #     has_padding = True
+    # else:
+    #     pass
+    #     assert type(data_pad.op) == tvm.tensor.PlaceholderOp
+    #     has_padding = False
+    # cfg.define_knob('data_pad_inline', [0, 1, 2, 3, 4])
 
-    if cfg['data_pad_inline'].val == 1 and has_padding:
-        s[data_pad].compute_inline()
-    if cfg['data_pad_inline'].val == 2 and has_padding:
-        s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
-    if cfg['data_pad_inline'].val == 3 and has_padding:
-        s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
-        s[data_pad].compute_at(s[data_vec], dvoh)
-    if cfg['data_pad_inline'].val == 4 and has_padding:
-        s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
-        s[data_pad].compute_at(s[data_vec], dvow)
+    (n, cii, h, w, ciii) = s[data_pad].op.axis
+    s[data_pad].vectorize(ciii)
 
-    cfg.define_knob('data_vec_inline', [0, 1, 2, 3])
-    if cfg['data_vec_inline'].val == 1:
-        s[data_vec].compute_at(s[conv], oh)
-    if cfg['data_vec_inline'].val == 2:
-        s[data_vec].compute_at(s[conv], ow)
-    if cfg['data_vec_inline'].val == 3:
-        s[data_vec].compute_at(s[conv], coo)
+    CIII = get_const_int(ciii.dom.extent)
+    print(CIII)
+    (n, h, w, vh, vw, cii_kh_kw_ciii) = s[data_vec].op.axis
+    (cii_kh_kw, ciii) = s[data_vec].split(cii_kh_kw_ciii, CIII)
+    (cii_kh, kw) = s[data_vec].split(cii_kh_kw, 3)
+    (cii, kh) = s[data_vec].split(cii_kh, 3)
+    s[data_vec].vectorize(ciii)
+    s[data_vec].unroll(kh)
+    s[data_vec].unroll(kw)
+    (n, coo, h, w, vh, vw, vc) = s[conv].op.axis
+    (cii_kh_kw_ciii, ) = s[conv].op.reduce_axis
+    s[conv].reorder(n, coo, h, w, vh, cii_kh_kw_ciii, vw, vc)
+    K = get_const_int(cii_kh_kw_ciii.dom.extent)
+    print(K)
+    s[conv].tensorize(vh, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
+    (n, coo, h, w, vc) = s[output].op.axis
+    s[conv].compute_at(s[output], h)
+    s[output].vectorize(vc)
+    # if cfg['data_pad_inline'].val == 1 and has_padding:
+    #     s[data_pad].compute_inline()
+    # if cfg['data_pad_inline'].val == 2 and has_padding:
+    #     s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
+    # if cfg['data_pad_inline'].val == 3 and has_padding:
+    #     s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
+    #     s[data_pad].compute_at(s[data_vec], dvoh)
+    # if cfg['data_pad_inline'].val == 4 and has_padding:
+    #     s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
+    #     s[data_pad].compute_at(s[data_vec], dvow)
 
-    # schedule conv
-    cfg["reorder_0"].apply(s, conv, [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw])
-    cfg["ann_reduce"].apply(s, conv, [kh, kw, ciii],
-                            axis_lens=[get_const_int(kh.dom.extent),
-                                       get_const_int(kw.dom.extent),
-                                       get_const_int(ciii.dom.extent)],
-                            max_unroll=16,
-                            cfg=cfg)
-    cfg["ann_spatial"].apply(s, conv, [vc],
-                             axis_lens=[
-                                        get_const_int(vc.dom.extent)],
-                             max_unroll=16,
-                             cfg=cfg)
-    s[conv].vectorize(vc)
+    # cfg.define_knob('data_vec_inline', [0, 1, 2, 3])
+    # if cfg['data_vec_inline'].val == 1:
+    #     s[data_vec].compute_at(s[conv], oh)
+    # if cfg['data_vec_inline'].val == 2:
+    #     s[data_vec].compute_at(s[conv], ow)
+    # if cfg['data_vec_inline'].val == 3:
+    #     s[data_vec].compute_at(s[conv], coo)
 
-    # schedule fusion
-    n, coo, h, w, vc = s[last].op.axis
-    s[last].vectorize(vc)
-    oh, vh = cfg['tile_oh'].apply(s, last, h)
-    ow, vw = cfg['tile_ow'].apply(s, last, w)
-    cfg["reorder_1"].apply(s, last, [n, coo, oh, ow, vh, vw, vc])
-    if last != output:
-        s[output].compute_inline()
-        cfg["ann_spatial"].apply(s, last, [vc],
-                                 axis_lens=[get_const_int(vc.dom.extent)],
-                                 max_unroll=16,
-                                 cfg=cfg)
-    else:
-        s[last].vectorize(vc)
-        pass
+    # # schedule conv
+    # cfg["reorder_0"].apply(s, conv, [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw])
+    # cfg["ann_reduce"].apply(s, conv, [kh, kw, ciii],
+    #                         axis_lens=[get_const_int(kh.dom.extent),
+    #                                    get_const_int(kw.dom.extent),
+    #                                    get_const_int(ciii.dom.extent)],
+    #                         max_unroll=16,
+    #                         cfg=cfg)
+    # cfg["ann_spatial"].apply(s, conv, [vc],
+    #                          axis_lens=[
+    #                                     get_const_int(vc.dom.extent)],
+    #                          max_unroll=16,
+    #                          cfg=cfg)
+    # s[conv].vectorize(vc)
 
-    cfg.define_knob('conv_inline', [1, 2, 3])
-    if cfg['conv_inline'].val == 1:
-        s[conv].compute_at(s[last], ow)
-    if cfg['conv_inline'].val == 2:
-        s[conv].compute_at(s[last], oh)
-    if cfg['conv_inline'].val == 3:
-        s[conv].compute_at(s[last], coo)
+    # # schedule fusion
+    # n, coo, h, w, vc = s[last].op.axis
+    # s[last].vectorize(vc)
+    # oh, vh = cfg['tile_oh'].apply(s, last, h)
+    # ow, vw = cfg['tile_ow'].apply(s, last, w)
+    # cfg["reorder_1"].apply(s, last, [n, coo, oh, ow, vh, vw, vc])
+    # if last != output:
+    #     s[output].compute_inline()
+    #     cfg["ann_spatial"].apply(s, last, [vc],
+    #                              axis_lens=[get_const_int(vc.dom.extent)],
+    #                              max_unroll=16,
+    #                              cfg=cfg)
+    # else:
+    #     s[last].vectorize(vc)
+    #     pass
 
-    # s[conv].compute_at(s[last], ow)
+    # cfg.define_knob('conv_inline', [1, 2, 3])
+    # if cfg['conv_inline'].val == 1:
+    #     s[conv].compute_at(s[last], ow)
+    # if cfg['conv_inline'].val == 2:
+    #     s[conv].compute_at(s[last], oh)
+    # if cfg['conv_inline'].val == 3:
+    #     s[conv].compute_at(s[last], coo)
 
-    _, _, _, _, vh, vw, vc = s[data_vec].op.axis
-    cfg["ann_spatial"].apply(s, data_vec, [vc],
-                             axis_lens=[get_const_int(vc.dom.extent)],
-                             max_unroll=16,
-                             cfg=cfg)
-    # s[data_vec].vectorize(vc)
-    # s[data_vec].unroll(vw)
+    # # s[conv].compute_at(s[last], ow)
+
+    # _, _, _, _, vh, vw, vc = s[data_vec].op.axis
+    # cfg["ann_spatial"].apply(s, data_vec, [vc],
+    #                          axis_lens=[get_const_int(vc.dom.extent)],
+    #                          max_unroll=16,
+    #                          cfg=cfg)
+    # # s[data_vec].vectorize(vc)
+    # # s[data_vec].unroll(vw)
 
     if kernel_vec.op.name == 'kernel_vec':
-        co, _, _, _, _ = s[kernel_vec].op.axis
-        s[kernel_vec].pragma(co, 'debug_skip_region')
+        s[kernel_vec].pragma(s[kernel_vec].op.axis[0], 'debug_skip_region')
         if autotvm.GLOBAL_SCOPE.in_tuning:
             # kernel packing will be pre-computed during compilation, so we skip
             # this part to make tuning records correct
-            s[kernel_vec].pragma(co, 'debug_skip_region')
+            # s[kernel_vec].pragma(co, 'debug_skip_region')
+            pass
         else:
             pass
     return s
@@ -290,7 +329,7 @@ def conv2d_NCHWc_direct_autotvm(s, ic, oc, kernel, pad, stride):
     Y = _decl_spatial_pack_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="int32")
     s = tvm.create_schedule([Y.op])
     s = _schedule_spatial_pack_NCHWc(cfg, s, Y, Y)
-    # print(tvm.lower(s, [X, W, Y], simple_mode=True))
+    print(tvm.lower(s, [X, W, Y], simple_mode=True))
     return s, [X, W, Y]
 
 
@@ -428,7 +467,7 @@ def run(layout,
 
         task = autotvm.task.create(
             conv2d_NCHWc_direct_autotvm,
-            args=(w.space, w.input_channel, w.output_channel, w.kernel, 0, w.stride),
+            args=(w.space, w.input_channel, w.output_channel, w.kernel, 1, w.stride),
             target=tvm.target.create(target if not local else local_target))
         print(task.config_space)
         tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")

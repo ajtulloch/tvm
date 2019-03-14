@@ -297,7 +297,7 @@ def conv2d_NCHWc_direct_autotvm(s, ic, oc, kernel, pad, stride):
     # ic = ((ic + 16 - 1) // 16) * 16
     # oc = ((oc + 16 - 1) // 16) * 16
     cfg = autotvm.get_config()
-    cfg.define_knob('BNInput', [8, 16]) # TODO, 8, 16
+    cfg.define_knob('BNInput', [4,]) # TODO, 8, 16
     cfg.define_knob('BNOutput', [8, 16]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
@@ -402,9 +402,9 @@ WORKLOADS = [
         # Workload(space=24, input_channel=a(96), output_channel=a(48), kernel=3, pad=1, stride=1),
         # Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
         # Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
-        Workload(space=192, input_channel=a(12), output_channel=1, kernel=3, pad=1, stride=1),
-        Workload(space=192, input_channel=1, output_channel=1, kernel=3, pad=1, stride=1),
-        Workload(space=192, input_channel=3, output_channel=a(12), kernel=3, pad=1, stride=1),
+        # Workload(space=192, input_channel=a(12), output_channel=1, kernel=3, pad=1, stride=1),
+        # Workload(space=192, input_channel=1, output_channel=1, kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=4, output_channel=a(12), kernel=3, pad=1, stride=1),
 ]
 
 target = tvm.target.arm_cpu("rasp3b")# 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
@@ -461,5 +461,6 @@ def run(layout,
                     autotvm.callback.log_to_file(str(autotvm_log))])
         except:
             logging.exception("Failed on workload: %s", w)
+
 if __name__ == "__main__":
     run()

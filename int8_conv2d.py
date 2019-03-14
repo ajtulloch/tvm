@@ -106,20 +106,19 @@ def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride,
 
     OH = (IH + pad_top + pad_bottom - KH) // HSTR + 1
     OW = (IW + pad_left + pad_right - KW) // WSTR + 1
-    assert pad_top == 0 and pad_left == 0
-    data_pad = data #pad(data, [0, 0, pad_top, pad_left, 0], [0, 0, pad_bottom, pad_right, 0], name="data_pad")
+    data_pad = pad(data, [0, 0, pad_top, pad_left, 0], [0, 0, pad_bottom, pad_right, 0], name="data_pad")
 
     # ==================== define configuration space ====================
     n, coo, oh, ow, vc = cfg.axis(N), cfg.axis(COO), cfg.axis(OH), cfg.axis(OW), cfg.axis(VC)
     cii, ciii, kh, kw = cfg.reduce_axis(CII), cfg.reduce_axis(CIII), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
 
-    oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2, filter=lambda x: x.size[-1] <= 4)
-    ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] <= 4)
+    oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
+    ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
 
     cfg.define_reorder("reorder_0",
                        [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
                        policy='candidate', candidate=[
-                           # [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
+                           [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
                            [n, coo, cii, oh, ow, kh, kw, ciii, vh, vw, vc],
                            [n, coo, cii, oh, ow, kh, kw, vh, ciii, vw, vc],
                            [n, coo, oh, ow, cii, kh, kw, ciii, vh, vw, vc],
@@ -185,13 +184,8 @@ def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride,
                 (kernel[coo, cii, kh, kw, ciii, vc]).astype("int32"),
                 axis=[cii, ciii, kh, kw]), name='conv')
 
-    def rq(x):
-        x_int16 = (x >> 5).astype("int16")
-        x_int8 = (x_int16 >> 6).astype("int8")
-        return tvm.max(tvm.min(x_int8, tvm.const(124, dtype="int8")), tvm.const(4, dtype="int8"))
-    output = tvm.compute(oshape, lambda n, coo, h, w, vc: rq(conv[n][coo][h//VH][w//VW][h%VH][w%VW][vc]),
+    output = tvm.compute(oshape, lambda n, coo, h, w, vc: conv[n][coo][h//VH][w//VW][h%VH][w%VW][vc],
                          name='output_unpack', tag='spatial_conv2d_output')
-    assert output.dtype == "int8"
     flops = 2 * N * COO * OH * OW * VC * KH * KW * CII * CIII
     cfg.add_flop(flops)
     return output
@@ -405,11 +399,12 @@ WORKLOADS = [
         # Workload(space=6, input_channel=a(180), output_channel=a(220), kernel=3, pad=1, stride=1),
         # Workload(space=6, input_channel=a(220), output_channel=a(180), kernel=3, pad=1, stride=1),
         # Workload(space=12, input_channel=a(180), output_channel=a(96), kernel=3, pad=1, stride=1),
-        Workload(space=24, input_channel=a(96), output_channel=a(48), kernel=3, pad=1, stride=1),
-        Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
-        Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
-        # Workload(space=192, input_channel=a(12), output_channel=a(1), kernel=3, pad=1, stride=1),
-        # Workload(space=192, input_channel=a(1), output_channel=a(1), kernel=3, pad=1, stride=1),
+        # Workload(space=24, input_channel=a(96), output_channel=a(48), kernel=3, pad=1, stride=1),
+        # Workload(space=48, input_channel=a(48), output_channel=a(24), kernel=3, pad=1, stride=1),
+        # Workload(space=96, input_channel=a(24), output_channel=a(12), kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=a(12), output_channel=1, kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=1, output_channel=1, kernel=3, pad=1, stride=1),
+        Workload(space=192, input_channel=3, output_channel=a(12), kernel=3, pad=1, stride=1),
 ]
 
 target = tvm.target.arm_cpu("rasp3b")# 'llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'
@@ -434,35 +429,37 @@ def run(layout,
         local):
     logging.basicConfig(level=logging.DEBUG)
     for i, w in enumerate(WORKLOADS):
-        # if w.in_filter % 16 != 0 or w.out_filter % 16 != 0:
-        #     continue
-        measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(timeout=80),
-            runner=autotvm.RPCRunner(
-                'rpi', '0.0.0.0', tracker_port,
-                number=autotvm_number,
-                repeat=autotvm_repeat,
-                timeout=80) if not local else
-            autotvm.LocalRunner(
-                timeout=80,
-                number=autotvm_number,
-                repeat=autotvm_repeat)
-        )
+        try:
+            # if w.in_filter % 16 != 0 or w.out_filter % 16 != 0:
+            #     continue
+            measure_option=autotvm.measure_option(
+                builder=autotvm.LocalBuilder(timeout=80),
+                runner=autotvm.RPCRunner(
+                    'rpi', '0.0.0.0', tracker_port,
+                    number=autotvm_number,
+                    repeat=autotvm_repeat,
+                    timeout=80) if not local else
+                autotvm.LocalRunner(
+                    timeout=80,
+                    number=autotvm_number,
+                    repeat=autotvm_repeat)
+            )
 
-        task = autotvm.task.create(
-            conv2d_NCHWc_direct_autotvm,
-            args=(w.space, w.input_channel, w.output_channel, w.kernel, 0, w.stride),
-            target=tvm.target.create(target if not local else local_target))
-        print(task.config_space)
-        tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
-        tuner.tune(
-            n_trial=autotvm_n_trial,
-            measure_option=measure_option,
-            callbacks=[
-                autotvm.callback.progress_bar(
-                    autotvm_n_trial,
-                    prefix="{w.space}S, {w.input_channel} -> {w.output_channel}, {w.kernel}K, {w.pad}P, {w.stride}s, {layout}".format(w=w, layout=layout)),
-                autotvm.callback.log_to_file(str(autotvm_log))])
-
+            task = autotvm.task.create(
+                conv2d_NCHWc_direct_autotvm,
+                args=(w.space, w.input_channel, w.output_channel, w.kernel, w.pad, w.stride),
+                target=tvm.target.create(target if not local else local_target))
+            print(task.config_space)
+            tuner = autotvm.tuner.XGBTuner(task, feature_type="knob")
+            tuner.tune(
+                n_trial=autotvm_n_trial,
+                measure_option=measure_option,
+                callbacks=[
+                    autotvm.callback.progress_bar(
+                        autotvm_n_trial,
+                        prefix="{w.space}S, {w.input_channel} -> {w.output_channel}, {w.kernel}K, {w.pad}P, {w.stride}s, {layout}".format(w=w, layout=layout)),
+                    autotvm.callback.log_to_file(str(autotvm_log))])
+        except:
+            logging.exception("Failed on workload: %s", w)
 if __name__ == "__main__":
     run()

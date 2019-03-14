@@ -1,4 +1,12 @@
-#include <stdint.h>
+
+// avoid using sysroot.
+
+#ifndef __arm__
+#error Only valid on ARMv7
+#else
+using int32_t = int;
+using int8_t = char;
+#endif
 
 extern "C" void gemm_ukernel_4x8__neon_asm(
     int32_t k, const int8_t* a, int32_t a_off, int32_t a_stride, const int8_t* b, int32_t b_off,

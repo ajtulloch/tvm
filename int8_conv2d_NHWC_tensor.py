@@ -33,7 +33,7 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
 
     Xb = tvm.decl_buffer(X.shape, X.dtype,
                          name="Xb",
-                         offset_factor=4 * K,
+                         offset_factor=K,
                          strides=[tvm.var('ldX'), 1])
     Wb = tvm.decl_buffer(W.shape, W.dtype,
                          name="Wb",
@@ -41,7 +41,7 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
                          strides=[8, 1])
     Zb = tvm.decl_buffer(Z.shape, Z.dtype,
                          name="Zb",
-                         offset_factor=4 * 8,
+                         offset_factor=8,
                          strides=[tvm.var('ldZ'), 1])
 
     def _intrin_func(ins, outs):
@@ -72,28 +72,31 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
         return tvm.decl_tensor_intrin(Z.op, _intrin_func, binds={X: Xb, W:Wb, Z: Zb})
 
 
-def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
+def _decl_spatial_pack_NHWC(cfg, data, kernel, num_filter, kernel_size, stride, padding, layout, out_layout, out_dtype):
     wkl = None
     out_dtype = out_dtype or data.dtype
-    N, CII, IH, IW, CIII = get_const_tuple(data.shape)
-    COO, CII, KH, KW, CIII_, VC = get_const_tuple(kernel.shape)
+    N, IH, IW, CI = get_const_tuple(data.shape)
+    CO, KH, KW, CI_ = get_const_tuple(kernel.shape)
+    assert CI_ == CI
 
     pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (KH, KW))
     HSTR, WSTR = stride if isinstance(stride, (tuple, list)) else (stride, stride)
 
     OH = (IH + pad_top + pad_bottom - KH) // HSTR + 1
     OW = (IW + pad_left + pad_right - KW) // WSTR + 1
-    data_pad = pad(data, [0, 0, pad_top, pad_left, 0], [0, 0, pad_bottom, pad_right, 0], name="data_pad")
+    data_pad = pad(data, [0, pad_top, pad_left, 0], [0, pad_bottom, pad_right, 0], name="data_pad")
 
     # ==================== define configuration space ====================
-    n, coo, oh, ow, vc = cfg.axis(N), cfg.axis(COO), cfg.axis(OH), cfg.axis(OW), cfg.axis(VC)
-    cii, ciii, kh, kw = cfg.reduce_axis(CII), cfg.reduce_axis(CIII), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
+    n, co, oh, ow = cfg.axis(N), cfg.axis(CO), cfg.axis(OH), cfg.axis(OW)
+    ci, kh, kw = cfg.reduce_axis(CI), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
 
     ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] % 4 == 0)
     oh, vh = cfg.define_split('tile_oh', oh, num_outputs=2)
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
+    VC = 8
     vw = cfg.axis(VW)
+    vc = cfg.axis(VC)
     # ow, vw = cfg.define_split('tile_ow', ow, num_outputs=2, filter=lambda x: x.size[-1] == 4)
 
     # cfg.define_reorder("reorder_0",
@@ -147,60 +150,50 @@ def _decl_spatial_pack_NCHWc(cfg, data, kernel, num_filter, kernel_size, stride,
     # ovshape = (N, COO, OH // VH, OW // VW, VH, VW, VC)
     # oshape = (N, COO, OH, OW, VC)
 
-    dvshape = (N, OH // VH, OW // VW, VH, VW, CII * KH * KW * CIII)
-    kvshape = (COO, CII * KH * KW * CIII, VC)
-    ovshape = (N, COO, OH // VH, OW // VW, VH, VW, VC)
-    oshape = (N, COO, OH, OW, VC)
+    dvshape = (N, OH // VH, OW // VW, VH, VW, KH * KW * CI)
+    kvshape = (CO // VC, KH * KW * CI, VC)
+    oshape = (N, OH, OW, CO)
 
-    def data_vec_compute(n, h, w, vh, vw, cii_kh_kw_ciii):
-        ciii = cii_kh_kw_ciii % CIII
-        kh = (cii_kh_kw_ciii // CIII) % KW
-        kw = (cii_kh_kw_ciii // CIII) // KW
-        kh = ((cii_kh_kw_ciii // CIII) // KW) % KH
-        cii = (((cii_kh_kw_ciii // CIII) // KW) // KH)
-        return data_pad[n][cii][h * VH * HSTR + vh + kh][w * VW * WSTR + vw + kw][ciii]
+    def data_vec_compute(n, h, w, vh, vw, kh_kw_ci):
+        ci = kh_kw_ci % CI
+        kh = (kh_kw_ci // CI) % KW
+        kw = (kh_kw_ci // CI) // KW
+        kh = ((kh_kw_ci // CI) // KW) % KH
+        return data_pad[n][h * VH * HSTR + vh + kh][w * VW * WSTR + vw + kw][ci]
     data_vec = tvm.compute(dvshape, data_vec_compute, name='data_vec')
 
-    def kernel_vec_compute(coo, cii_kh_kw_ciii, vc):
-        ciii = cii_kh_kw_ciii % CIII
-        kh = (cii_kh_kw_ciii // CIII) % KW
-        kw = (cii_kh_kw_ciii // CIII) // KW
-        kh = ((cii_kh_kw_ciii // CIII) // KW) % KH
-        cii = (((cii_kh_kw_ciii // CIII) // KW) // KH)
-        return kernel[coo][cii][kh][kw][ciii][vc]
+    def kernel_vec_compute(coo, kh_kw_ci, vc):
+        ci = kh_kw_ci % CI
+        kh = (kh_kw_ci // CI) % KW
+        kw = (kh_kw_ci // CI) // KW
+        kh = ((kh_kw_ci // CI) // KW) % KH
+        return kernel[coo * VC + vc][kh][kw][ci]
     kernel_vec = tvm.compute(kvshape, kernel_vec_compute, name='kernel_vec')
 
-    cii_kh_kw_ciii = tvm.reduce_axis((0, CII * KH * KW * CIII), name='cii_kh_kw_ciii')
-
-    conv = tvm.compute(
-        ovshape,
-        lambda n, coo, h, w, vh, vw, vc: tvm.sum(
-            data_vec[n, h, w, vh, vw, cii_kh_kw_ciii].astype("int32") *
-            kernel_vec[coo, cii_kh_kw_ciii, vc].astype("int32"),
-            axis=[cii_kh_kw_ciii]
-        ),
-        name='conv')
+    kh_kw_ci = tvm.reduce_axis((0, KH * KW * CI), name='kh_kw_ci')
 
     output = tvm.compute(
         oshape,
-        lambda n, coo, h, w, vc: conv[n][coo][h // VH][w // VW][h % VH][w % VW][vc],
-        name='output_unpack', tag='spatial_conv2d_output'
-    )
+        lambda n, h, w, co: tvm.sum(
+            data_vec[n, h // VH, w // VW, h % VH, w % VW, kh_kw_ci].astype("int32") *
+            kernel_vec[co // VC, kh_kw_ci, co % VC].astype("int32"),
+            axis=[kh_kw_ci]
+        ),
+        name='conv')
     assert output.dtype == "int32"
-    flops = 2 * N * COO * OH * OW * VC * KH * KW * CII * CIII
+    flops = 2 * N * CO * OH * OW * KH * KW * CI
     cfg.add_flop(flops)
     return output
 
-def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
+def _schedule_spatial_pack_NHWC(cfg, s, output, last):
     """schedule implementation"""
     # import ipdb
     # ipdb.set_trace()
-    conv = output.op.input_tensors[0]
-    data_vec = conv.op.input_tensors[0]
+    data_vec = output.op.input_tensors[0]
     data_pad = data_vec.op.input_tensors[0]
     # s[data_pad].compute_inline()
 
-    kernel_vec = conv.op.input_tensors[1]
+    kernel_vec = output.op.input_tensors[1]
     # n, coo, oh, ow, vh, vw, vc = s[conv].op.axis
     # _, dvcii, dvoh, dvow, dvvh, dvvw, dvciii = s[data_vec].op.axis
     # cii, ciii, kh, kw = s[conv].op.reduce_axis
@@ -214,15 +207,17 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
     #     has_padding = False
     # cfg.define_knob('data_pad_inline', [0, 1, 2, 3, 4])
 
-    (n, cii, h, w, ciii) = s[data_pad].op.axis
-    s[data_pad].vectorize(ciii)
+    (n, h, w, ci) = s[data_pad].op.axis
+    s[data_pad].vectorize(ci)
 
-    CIII = get_const_int(ciii.dom.extent)
-    (n, h, w, vh, vw, cii_kh_kw_ciii) = s[data_vec].op.axis
-    (cii_kh_kw, ciii) = s[data_vec].split(cii_kh_kw_ciii, CIII)
-    (cii_kh, kw) = s[data_vec].split(cii_kh_kw, 3)
-    (cii, kh) = s[data_vec].split(cii_kh, 3)
-    s[data_vec].vectorize(ciii)
+    CI = get_const_int(ci.dom.extent)
+    (n, h, w, vh, vw, kh_kw_ci) = s[data_vec].op.axis
+    VH = get_const_int(vh.dom.extent)
+    VW = get_const_int(vw.dom.extent)
+
+    (kh_kw, ci) = s[data_vec].split(kh_kw_ci, CI)
+    (kh, kw) = s[data_vec].split(kh_kw, 3)
+    s[data_vec].vectorize(ci)
     s[data_vec].unroll(kh)
     s[data_vec].unroll(kw)
 
@@ -232,97 +227,21 @@ def _schedule_spatial_pack_NCHWc(cfg, s, output, last):
     else:
         s[data_pad].compute_at(s[data_vec], [h, vh][cfg['data_pad_compute_at'].val])
 
-    (n, coo, h, w, vh, vw, vc) = s[conv].op.axis
-    (cii_kh_kw_ciii, ) = s[conv].op.reduce_axis
-    s[conv].reorder(n, coo, h, w, vh, vw, cii_kh_kw_ciii, vc)
-    K = get_const_int(cii_kh_kw_ciii.dom.extent)
-    (vwo, vwi) = s[conv].split(vw, 4)
-    s[conv].tensorize(vwi, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
-    s[conv].unroll(vwo)
-    # s[conv].unroll(vh)
+    (n, h, w, co) = s[output].op.axis
+    (h, vh) = s[output].split(h, VH)
+    (w, vw) = s[output].split(w, VW)
+
+    (co, vc) = s[output].split(co, 8)
+    (kh_kw_ci, ) = s[output].op.reduce_axis
+    s[output].reorder(n, h, w, co, vh, vw, kh_kw_ci, vc)
+    K = get_const_int(kh_kw_ci.dom.extent)
+    (vwo, vwi) = s[output].split(vw, 4)
+    s[output].tensorize(vwi, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
+    s[output].unroll(vwo)
+    s[output].unroll(vh)
 
     cfg.define_knob('data_vec_compute_at', [0, 1, 2])
-    s[data_vec].compute_at(s[conv], [n, h, w][cfg['data_vec_compute_at'].val])
-
-    (n, coo, h, w, vc) = s[output].op.axis
-    VW = get_const_int(vw.dom.extent)
-    # assert VW == 4
-    VH = get_const_int(vh.dom.extent)
-    (w, vw) = s[output].split(w, VW)
-    (h, vh) = s[output].split(h, VH)
-    s[output].reorder(n, coo, h, vh, w, vw, vc)
-    cfg.define_knob('conv_compute_at', [0, 1, 2])
-    s[conv].compute_at(s[output], [vh, w, coo][cfg['conv_compute_at'].val])
-    s[output].unroll(vw)
-    s[output].vectorize(vc)
-
-    # if cfg['data_pad_inline'].val == 1 and has_padding:
-    #     s[data_pad].compute_inline()
-    # if cfg['data_pad_inline'].val == 2 and has_padding:
-    #     s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
-    # if cfg['data_pad_inline'].val == 3 and has_padding:
-    #     s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
-    #     s[data_pad].compute_at(s[data_vec], dvoh)
-    # if cfg['data_pad_inline'].val == 4 and has_padding:
-    #     s[data_pad].vectorize(list(s[data_pad].op.axis)[-1])
-    #     s[data_pad].compute_at(s[data_vec], dvow)
-
-    # cfg.define_knob('data_vec_inline', [0, 1, 2, 3])
-    # if cfg['data_vec_inline'].val == 1:
-    #     s[data_vec].compute_at(s[conv], oh)
-    # if cfg['data_vec_inline'].val == 2:
-    #     s[data_vec].compute_at(s[conv], ow)
-    # if cfg['data_vec_inline'].val == 3:
-    #     s[data_vec].compute_at(s[conv], coo)
-
-    # # schedule conv
-    # cfg["reorder_0"].apply(s, conv, [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw])
-    # cfg["ann_reduce"].apply(s, conv, [kh, kw, ciii],
-    #                         axis_lens=[get_const_int(kh.dom.extent),
-    #                                    get_const_int(kw.dom.extent),
-    #                                    get_const_int(ciii.dom.extent)],
-    #                         max_unroll=16,
-    #                         cfg=cfg)
-    # cfg["ann_spatial"].apply(s, conv, [vc],
-    #                          axis_lens=[
-    #                                     get_const_int(vc.dom.extent)],
-    #                          max_unroll=16,
-    #                          cfg=cfg)
-    # s[conv].vectorize(vc)
-
-    # # schedule fusion
-    # n, coo, h, w, vc = s[last].op.axis
-    # s[last].vectorize(vc)
-    # oh, vh = cfg['tile_oh'].apply(s, last, h)
-    # ow, vw = cfg['tile_ow'].apply(s, last, w)
-    # cfg["reorder_1"].apply(s, last, [n, coo, oh, ow, vh, vw, vc])
-    # if last != output:
-    #     s[output].compute_inline()
-    #     cfg["ann_spatial"].apply(s, last, [vc],
-    #                              axis_lens=[get_const_int(vc.dom.extent)],
-    #                              max_unroll=16,
-    #                              cfg=cfg)
-    # else:
-    #     s[last].vectorize(vc)
-    #     pass
-
-    # cfg.define_knob('conv_inline', [1, 2, 3])
-    # if cfg['conv_inline'].val == 1:
-    #     s[conv].compute_at(s[last], ow)
-    # if cfg['conv_inline'].val == 2:
-    #     s[conv].compute_at(s[last], oh)
-    # if cfg['conv_inline'].val == 3:
-    #     s[conv].compute_at(s[last], coo)
-
-    # # s[conv].compute_at(s[last], ow)
-
-    # _, _, _, _, vh, vw, vc = s[data_vec].op.axis
-    # cfg["ann_spatial"].apply(s, data_vec, [vc],
-    #                          axis_lens=[get_const_int(vc.dom.extent)],
-    #                          max_unroll=16,
-    #                          cfg=cfg)
-    # # s[data_vec].vectorize(vc)
-    # # s[data_vec].unroll(vw)
+    s[data_vec].compute_at(s[output], [n, h, w][cfg['data_vec_compute_at'].val])
 
     if kernel_vec.op.name == 'kernel_vec':
         s[kernel_vec].pragma(s[kernel_vec].op.axis[0], 'debug_skip_region')
@@ -344,13 +263,13 @@ def conv2d_NCHWc_direct_autotvm(s, ic, oc, kernel, pad, stride):
     cfg.define_knob('BNOutput', [8]) # TODO 8, 16
     BNInput = cfg['BNInput'].val
     BNOutput = cfg['BNOutput'].val
-    X = tvm.placeholder(shape=(1, ic // BNInput, s, s, BNInput), dtype="int8", name="X")
-    W = tvm.placeholder(shape=(oc // BNOutput, ic // BNInput, kernel, kernel, BNInput, BNOutput), dtype="int8", name="W")
+    X = tvm.placeholder(shape=(1, s, s, ic), dtype="int8", name="X")
+    W = tvm.placeholder(shape=(oc, kernel, kernel, ic), dtype="int8", name="W")
 
-    Y = _decl_spatial_pack_NCHWc(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="int32")
+    Y = _decl_spatial_pack_NHWC(cfg, X, W, num_filter=oc, kernel_size=kernel, stride=stride, padding=pad, layout="NCHW{}c".format(BNInput), out_layout="NCHW{}c".format(BNOutput), out_dtype="int32")
     s = tvm.create_schedule([Y.op])
-    s = _schedule_spatial_pack_NCHWc(cfg, s, Y, Y)
-    # print(tvm.lower(s, [X, W, Y], simple_mode=True))
+    s = _schedule_spatial_pack_NHWC(cfg, s, Y, Y)
+    print(tvm.lower(s, [X, W, Y], simple_mode=True))
     return s, [X, W, Y]
 
 

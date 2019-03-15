@@ -5,6 +5,7 @@ from ..generic import schedule_conv2d_nhwc
 import tvm
 from tvm import autotvm
 
+
 def intrin_3x8_gemm_neon_ir():
     import os
     src = r"""
@@ -18,7 +19,7 @@ using int32_t = int;
 using int8_t = char;
 #endif
 
-extern "C" void gemm_ukernel_4x8__neon_asm(
+extern "C" void gemm_ukernel_3x8__neon_asm(
     int32_t k, const int8_t* a, int32_t a_off, int32_t a_stride, const int8_t* b, int32_t b_off,
     int32_t b_stride, int32_t* c, int32_t c_off, int32_t c_stride) {
   a = a + a_off;
@@ -61,11 +62,10 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
       " VMLAL.S16 q9, d9, d0[0]\n\t"
       " VMLAL.S16 q10, d8, d2[0]\n\t"
       " VMLAL.S16 q11, d9, d2[0]\n\t"
+      " VMOVL.S8 q5, d11\n\t"
       " VMLAL.S16 q12, d8, d4[0]\n\t"
       " VMLAL.S16 q13, d9, d4[0]\n\t"
-      " VMOVL.S8 q5, d11\n\t"
-      " VMLAL.S16 q14, d8, d6[0]\n\t"
-      " VMLAL.S16 q15, d9, d6[0]\n\t"
+
 
       // Load b2
       " VLD1.8 {d9}, [%[b]]!\n\t"
@@ -74,11 +74,9 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
       " VMLAL.S16 q9, d11, d0[1]\n\t"
       " VMLAL.S16 q10, d10, d2[1]\n\t"
       " VMLAL.S16 q11, d11, d2[1]\n\t"
+      " VMOVL.S8 q4, d9\n\t"
       " VMLAL.S16 q12, d10, d4[1]\n\t"
       " VMLAL.S16 q13, d11, d4[1]\n\t"
-      " VMOVL.S8 q4, d9\n\t"
-      " VMLAL.S16 q14, d10, d6[1]\n\t"
-      " VMLAL.S16 q15, d11, d6[1]\n\t"
 
       // Load b3
       " VLD1.8 {d11}, [%[b]]!\n\t"
@@ -87,11 +85,10 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
       " VMLAL.S16 q9, d9, d0[2]\n\t"
       " VMLAL.S16 q10, d8, d2[2]\n\t"
       " VMLAL.S16 q11, d9, d2[2]\n\t"
+      " VMOVL.S8 q5, d11\n\t"
       " VMLAL.S16 q12, d8, d4[2]\n\t"
       " VMLAL.S16 q13, d9, d4[2]\n\t"
-      " VMOVL.S8 q5, d11\n\t"
-      " VMLAL.S16 q14, d8, d6[2]\n\t"
-      " VMLAL.S16 q15, d9, d6[2]\n\t"
+
 
       // Load b4
       " VLD1.8 {d9}, [%[b]]!\n\t"
@@ -100,11 +97,9 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
       " VMLAL.S16 q9, d11, d0[3]\n\t"
       " VMLAL.S16 q10, d10, d2[3]\n\t"
       " VMLAL.S16 q11, d11, d2[3]\n\t"
+      " VMOVL.S8 q4, d9\n\t"
       " VMLAL.S16 q12, d10, d4[3]\n\t"
       " VMLAL.S16 q13, d11, d4[3]\n\t"
-      " VMOVL.S8 q4, d9\n\t"
-      " VMLAL.S16 q14, d10, d6[3]\n\t"
-      " VMLAL.S16 q15, d11, d6[3]\n\t"
 
       // Load b5
       " VLD1.8 {d11}, [%[b]]!\n\t"
@@ -141,14 +136,13 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
       " VMLAL.S16 q12, d8, d5[2]\n\t"
       " VMLAL.S16 q13, d9, d5[2]\n\t"
 
+
       " VMLAL.S16 q8, d10, d1[3]\n\t"
       " VMLAL.S16 q9, d11, d1[3]\n\t"
       " VMLAL.S16 q10, d10, d3[3]\n\t"
       " VMLAL.S16 q11, d11, d3[3]\n\t"
       " VMLAL.S16 q12, d10, d5[3]\n\t"
       " VMLAL.S16 q13, d11, d5[3]\n\t"
-      " VMLAL.S16 q14, d10, d7[3]\n\t"
-      " VMLAL.S16 q15, d11, d7[3]\n\t"
 
       "	SUBS %[k_size_t], %[k_size_t], #8\n\t"
       "	BNE 0b\n\t"
@@ -156,8 +150,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
       "	VST1.32 {d16-d19}, [%[c0]], %[c_stride_bytes_size_t]\n\t"
       "	VST1.32 {d20-d23}, [%[c0]], %[c_stride_bytes_size_t]\n\t"
       "	VST1.32 {d24-d27}, [%[c0]], %[c_stride_bytes_size_t]\n\t"
-      "	VST1.32 {d28-d31}, [%[c0]], %[c_stride_bytes_size_t]\n\t"
-      : [c0] "+r"(c0), [b] "+r"(b), [a0] "+r"(a0), [a1] "+r"(a1), [a2] "+r"(a2), [a3] "+r"(a3),
+      : [c0] "+r"(c0), [b] "+r"(b), [a0] "+r"(a0), [a1] "+r"(a1), [a2] "+r"(a2),
         [k_size_t] "+r"(k_size_t), [c_stride_bytes_size_t] "+r"(c_stride_bytes_size_t)
       :
       : "cc", "memory",
@@ -351,6 +344,52 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
 # M == 4 input width
 # N == 8 output channels.
 # Computes a multiplication of
+
+def _intrin_Kx3xint8_Kx8xint8_3x8_int32(K):
+    X = tvm.placeholder((3, K), dtype="int8", name='X')
+    W = tvm.placeholder((K, 8), dtype="int8", name='X')
+    k = tvm.reduce_axis((0, K), name='k')
+    Z = tvm.compute((3, 8), lambda i, j: tvm.sum(X[i, k].astype("int32") * W[k, j].astype("int32"), axis=[k]), name="Z")
+
+    Xb = tvm.decl_buffer(X.shape, X.dtype,
+                         name="Xb",
+                         offset_factor=K,
+                         strides=[tvm.var('ldX'), 1])
+    Wb = tvm.decl_buffer(W.shape, W.dtype,
+                         name="Wb",
+                         offset_factor=K * 8,
+                         strides=[8, 1])
+    Zb = tvm.decl_buffer(Z.shape, Z.dtype,
+                         name="Zb",
+                         offset_factor=8,
+                         strides=[tvm.var('ldZ'), 1])
+
+    def _intrin_func(ins, outs):
+        xx, ww = ins
+        zz = outs[0]
+
+        def _instr(index):
+            irb = tvm.ir_builder.create()
+            irb.scope_attr(tvm.const(1, dtype="int32"), "pragma_import_llvm", intrin_3x8_gemm_neon_ir())
+            extern_call = tvm.call_extern(
+                "int32",
+                "gemm_ukernel_3x8__neon_asm",
+                K,
+                irb.buffer_ptr(xx),
+                xx.elem_offset,
+                xx.strides[0],
+                irb.buffer_ptr(ww),
+                ww.elem_offset,
+                ww.strides[0],
+                irb.buffer_ptr(zz),
+                zz.elem_offset,
+                zz.strides[0])
+            irb.emit(extern_call)
+            return irb.get()
+        # body, reset, update
+        return _instr(0)
+    with tvm.build_config():
+        return tvm.decl_tensor_intrin(Z.op, _intrin_func, binds={X: Xb, W:Wb, Z: Zb})
 
 def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
     X = tvm.placeholder((4, K), dtype="int8", name='X')

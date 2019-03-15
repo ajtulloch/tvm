@@ -345,6 +345,8 @@ def _build_func_common(measure_input, check_gpu=None, cuda_arch=None, build_opti
             set_cuda_target_arch(cuda_arch)
 
         with build_config(**opts):
+            import tvm
+            print(tvm.lower(s, args, simple_mode=True))
             func = build(s, args, target_host=task.target_host)
             # import random
             # name = "kernel_" + str(random.randint(0, 10000))

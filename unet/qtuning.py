@@ -64,8 +64,8 @@ def tune_tasks(tasks,
 @click.option('--align', default=8)
 @click.option(
     '--model', type=click.Choice(['unet', 'resnet50']), required=True)
-@click.option('--autotvm_number', default=50)
-@click.option('--autotvm_repeat', default=4)
+@click.option('--autotvm_number', default=10)
+@click.option('--autotvm_repeat', default=2)
 @click.option('--autotvm_n_trial', default=200)
 @click.option('--autotvm_early_stopping', default=100)
 @click.option('--autotvm_log', default="autotvm_unet_tuning.log", type=str)
@@ -76,7 +76,7 @@ def tune_tasks(tasks,
 def run(align, model, autotvm_number, autotvm_repeat, autotvm_log,
         autotvm_n_trial, autotvm_early_stopping, tracker_port, opt_level,
         device):
-    logging.basicConfig(level=logging.INFO)
+    logging.basicConfig(level=logging.DEBUG)
     target = dict(skl=skl_target, rpi=rpi_target, local=local_target)[device]
     print(target)
     sym, image_shape, output_shape = models.get_mxnet_symbol(model, align)
@@ -115,33 +115,33 @@ def run(align, model, autotvm_number, autotvm_repeat, autotvm_log,
     with tempfile.NamedTemporaryFile(delete=False, suffix="tvm.json") as f:
         f.write(qgraph_json)
     netron.start(f.name, host="localhost")
-    # with target:
-    #     with relay.build_config(opt_level=opt_level):
-    #         qgraph_json, lib, params = relay.build(qgraph, target, params=params)
+    with target:
+        with relay.build_config(opt_level=opt_level):
+            qgraph_json, lib, params = relay.build(qgraph, target, params=params)
 
-    # with target:
-    #     with relay.build_config(opt_level=2):
-    #         tasks = autotvm.task.extract_from_program(
-    #             qgraph, target=target, params=params, ops=(relay.op.nn.conv2d, ))
-    # tasks = list(reversed(tasks))
-    # logging.info("Got %s tasks", len(tasks))
-    # for i, task in enumerate(tasks):
-    #     logging.info("Task %s: %s", i, task)
-    # # tasks = tasks[1:]
-    # tune_tasks(
-    #     tasks,
-    #     measure_option=autotvm.measure_option(
-    #         builder=autotvm.LocalBuilder(timeout=50),
-    #         runner=autotvm.RPCRunner(
-    #             device,
-    #             '0.0.0.0',
-    #             tracker_port,
-    #             number=autotvm_number,
-    #             repeat=autotvm_repeat,
-    #             timeout=50)),
-    #     n_trial=autotvm_n_trial,
-    #     early_stopping=autotvm_early_stopping,
-    #     log_filename=str(autotvm_log))
+    with target:
+        with relay.build_config(opt_level=2):
+            tasks = autotvm.task.extract_from_program(
+                qgraph, target=target, params=params, ops=(relay.op.nn.conv2d, ))
+    tasks = list(reversed(tasks))
+    logging.info("Got %s tasks", len(tasks))
+    for i, task in enumerate(tasks):
+        logging.info("Task %s: %s", i, task)
+    # tasks = tasks[1:]
+    tune_tasks(
+        tasks,
+        measure_option=autotvm.measure_option(
+            builder=autotvm.LocalBuilder(timeout=1000),
+            runner=autotvm.RPCRunner(
+                device,
+                '0.0.0.0',
+                tracker_port,
+                number=autotvm_number,
+                repeat=autotvm_repeat,
+                timeout=1000)),
+        n_trial=autotvm_n_trial,
+        early_stopping=autotvm_early_stopping,
+        log_filename=str(autotvm_log))
 
 
 if __name__ == '__main__':

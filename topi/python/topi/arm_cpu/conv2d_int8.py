@@ -169,8 +169,6 @@ def intrin_4x8_gemm_neon_ir():
     import os
     src = r"""
 
-// avoid using sysroot.
-
 #ifndef __arm__
 #error Only valid on ARMv7
 #else
@@ -339,17 +337,21 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
     """
     from tvm.contrib import clang
     z = clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"], output="/tmp/x.ll")
+    print(clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"]))
     return "/tmp/x.ll"
 
 # M == 4 input width
 # N == 8 output channels.
 # Computes a multiplication of
 
-def _intrin_Kx3xint8_Kx8xint8_3x8_int32(K):
+def _intrin_Kx3xint8_Kx8xint8_3x8_int32(KH, KW, CI):
+    K = KH * KW * CI
     X = tvm.placeholder((3, K), dtype="int8", name='X')
-    W = tvm.placeholder((K, 8), dtype="int8", name='X')
-    k = tvm.reduce_axis((0, K), name='k')
-    Z = tvm.compute((3, 8), lambda i, j: tvm.sum(X[i, k].astype("int32") * W[k, j].astype("int32"), axis=[k]), name="Z")
+    W = tvm.placeholder((KH, KW, CI, 8), dtype="int8", name='X')
+    kh = tvm.reduce_axis((0, KH), name='kh')
+    kw = tvm.reduce_axis((0, KW), name='kw')
+    ci = tvm.reduce_axis((0, CI), name='ci')
+    Z = tvm.compute((3, 8), lambda i, j: tvm.sum(X[i, kh * KW * CI + kw * CI + ci].astype("int32") * W[kh, kw, ci, j].astype("int32"), axis=[kh, kw, ci]), name="Z")
 
     Xb = tvm.decl_buffer(X.shape, X.dtype,
                          name="Xb",
@@ -358,7 +360,7 @@ def _intrin_Kx3xint8_Kx8xint8_3x8_int32(K):
     Wb = tvm.decl_buffer(W.shape, W.dtype,
                          name="Wb",
                          offset_factor=K * 8,
-                         strides=[8, 1])
+                         strides=[8 * CI * KW, 8 * CI, 8, 1])
     Zb = tvm.decl_buffer(Z.shape, Z.dtype,
                          name="Zb",
                          offset_factor=8,
@@ -380,7 +382,7 @@ def _intrin_Kx3xint8_Kx8xint8_3x8_int32(K):
                 xx.strides[0],
                 irb.buffer_ptr(ww),
                 ww.elem_offset,
-                ww.strides[0],
+                ww.strides[2],
                 irb.buffer_ptr(zz),
                 zz.elem_offset,
                 zz.strides[0])
@@ -391,11 +393,14 @@ def _intrin_Kx3xint8_Kx8xint8_3x8_int32(K):
     with tvm.build_config():
         return tvm.decl_tensor_intrin(Z.op, _intrin_func, binds={X: Xb, W:Wb, Z: Zb})
 
-def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
+def _intrin_Kx4xint8_Kx8xint8_4x8_int32(KH, KW, CI):
+    K = KH * KW * CI
     X = tvm.placeholder((4, K), dtype="int8", name='X')
-    W = tvm.placeholder((K, 8), dtype="int8", name='X')
-    k = tvm.reduce_axis((0, K), name='k')
-    Z = tvm.compute((4, 8), lambda i, j: tvm.sum(X[i, k].astype("int32") * W[k, j].astype("int32"), axis=[k]), name="Z")
+    W = tvm.placeholder((KH, KW, CI, 8), dtype="int8", name='X')
+    kh = tvm.reduce_axis((0, KH), name='kh')
+    kw = tvm.reduce_axis((0, KW), name='kw')
+    ci = tvm.reduce_axis((0, CI), name='ci')
+    Z = tvm.compute((4, 8), lambda i, j: tvm.sum(X[i, kh * KW * CI + kw * CI + ci].astype("int32") * W[kh, kw, ci, j].astype("int32"), axis=[kh, kw, ci]), name="Z")
 
     Xb = tvm.decl_buffer(X.shape, X.dtype,
                          name="Xb",
@@ -404,7 +409,7 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
     Wb = tvm.decl_buffer(W.shape, W.dtype,
                          name="Wb",
                          offset_factor=K * 8,
-                         strides=[8, 1])
+                         strides=[8 * CI * KW, 8 * CI, 8, 1])
     Zb = tvm.decl_buffer(Z.shape, Z.dtype,
                          name="Zb",
                          offset_factor=8,
@@ -426,7 +431,7 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
                 xx.strides[0],
                 irb.buffer_ptr(ww),
                 ww.elem_offset,
-                ww.strides[0],
+                ww.strides[2],
                 irb.buffer_ptr(zz),
                 zz.elem_offset,
                 zz.strides[0])
@@ -437,12 +442,12 @@ def _intrin_Kx4xint8_Kx8xint8_4x8_int32(K):
     with tvm.build_config():
         return tvm.decl_tensor_intrin(Z.op, _intrin_func, binds={X: Xb, W:Wb, Z: Zb})
 
-
 def decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out_dtype, num_tile):
     wkl = None
     out_dtype = out_dtype or data.dtype
     N, IH, IW, CI = get_const_tuple(data.shape)
-    KH, KW, CI_, CO = get_const_tuple(kernel.shape)
+    COO, KH, KW, CI_, VC = get_const_tuple(kernel.shape)
+    CO = VC * COO
     assert CI_ == CI
 
     pad_top, pad_left, pad_bottom, pad_right = get_pad_tuple(padding, (KH, KW))
@@ -453,18 +458,20 @@ def decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out
     data_pad = pad(data, [0, pad_top, pad_left, 0], [0, pad_bottom, pad_right, 0], name="data_pad")
 
     # ==================== define configuration space ====================
-    n, co, oh, ow = cfg.axis(N), cfg.axis(CO), cfg.axis(OH), cfg.axis(OW)
+    n, coo, oh, ow, vc = cfg.axis(N), cfg.axis(COO), cfg.axis(OH), cfg.axis(OW), cfg.axis(VC)
     ci, kh, kw = cfg.reduce_axis(CI), cfg.reduce_axis(KH), cfg.reduce_axis(KW)
 
+    # ow, vw = cfg.define_split(
+    #     'tile_ow', cfg.axis(OW), num_outputs=2,
+    #     filter=lambda x: x.size[-1] % 4 == 0 if OW % 4 == 0 else True)
     ow, vw = cfg.define_split(
         'tile_ow', cfg.axis(OW), num_outputs=2,
-        filter=lambda x: x.size[-1] % 4 == 0 if OW % 4 == 0 else True)
+        filter=lambda x: x.size[-1] == 4 if OW % 4 == 0 else True)
     oh, vh = cfg.define_split('tile_oh', cfg.axis(OH), num_outputs=2)
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
     VC = 8
     vw = cfg.axis(VW)
-    vc = cfg.axis(VC)
 
     # cfg.define_reorder("reorder_0",
     #                    [n, coo, cii, oh, ow, kh, kw, vc, ciii, vh, vw],
@@ -502,23 +509,8 @@ def decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out
 
     # assert VW == 4
     assert VC == 8
-    assert CO % VC == 0
-    # input            = (N, CII, IH, IW, CIII)
-    # -> transpose
-    ############################################################
-    # input_tile_shape = (N, CII, OH // VH, OH // VH, VH + KH, VW + KW, CIII)
-    # oshape           = (N, COO, OH // VH, OW // VH, VH, VW, COOO)
-    ############################################################
-    # -> transpose
-    # O_shape          = (N, COO, OH, OW, COOO)
-
-
-    # dvshape = (N, CII, OH // VH, OW // VW, VH*HSTR + KH-1, VW*WSTR + KW-1, CIII)
-    # ovshape = (N, COO, OH // VH, OW // VW, VH, VW, VC)
-    # oshape = (N, COO, OH, OW, VC)
 
     dvshape = (N, OH // VH, OW // VW, VH, VW, KH * KW * CI)
-    kvshape = (CO // VC, KH * KW * CI, VC)
     oshape = (N, OH, OW, CO)
 
     def data_vec_compute(n, h, w, vh, vw, kh_kw_ci):
@@ -529,26 +521,26 @@ def decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out
         return data_pad[n][h * VH * HSTR + vh + kh][w * VW * WSTR + vw + kw][ci]
     data_vec = tvm.compute(dvshape, data_vec_compute, name='data_vec')
 
-    def kernel_vec_compute(coo, kh_kw_ci, vc):
-        ci = kh_kw_ci % CI
-        kh = (kh_kw_ci // CI) % KW
-        kw = (kh_kw_ci // CI) // KW
-        kh = ((kh_kw_ci // CI) // KW) % KH
-        return kernel[kh][kw][ci][coo * VC + vc]
-    kernel_vec = tvm.compute(kvshape, kernel_vec_compute, name='kernel_vec')
+    # def kernel_vec_compute(coo, kh, kw, ci, vc):
+    #     return kernel[coo * VC + vc][kh][kw][ci]
+    # kernel_vec = tvm.compute(kvshape, kernel_vec_compute, name='kernel_vec')
 
-    kh_kw_ci = tvm.reduce_axis((0, KH * KW * CI), name='kh_kw_ci')
+    kh = tvm.reduce_axis((0, KH), name="kh")
+    kw = tvm.reduce_axis((0, KW), name="kw")
+    ci = tvm.reduce_axis((0, CI), name='ci')
 
     output = tvm.compute(
         oshape,
         lambda n, h, w, co: tvm.sum(
-            data_vec[n, h // VH, w // VW, h % VH, w % VW, kh_kw_ci].astype("int32") *
-            kernel_vec[co // VC, kh_kw_ci, co % VC].astype("int32"),
-            axis=[kh_kw_ci]
+            data_vec[n, h // VH, w // VW, h % VH, w % VW, kh * KW * CI + kw * CI + ci].astype("int32") *
+            kernel[co // VC, kh, kw, ci, co % VC].astype("int32"),
+            axis=[kh, kw, ci]
         ),
         name='conv',
         tag='spatial_conv2d_NHWC_output')
     assert output.dtype == "int32"
+    flops = 2 * N * CO * OH * OW * KH * KW * CI
+    cfg.add_flop(flops)
     return output
 
 @autotvm.register_topi_schedule(schedule_conv2d_nhwc, 'arm_cpu', ['direct', 'winograd'])
@@ -585,7 +577,6 @@ def _schedule_spatial_pack_NHWC(cfg, s, output, last):
     data_vec = output.op.input_tensors[0]
     data_pad = data_vec.op.input_tensors[0]
     kernel_vec = output.op.input_tensors[1]
-
     (n, h, w, ci) = s[data_pad].op.axis
     s[data_pad].vectorize(ci)
 
@@ -611,22 +602,22 @@ def _schedule_spatial_pack_NHWC(cfg, s, output, last):
     (w, vw) = s[output].split(w, VW)
 
     (co, vc) = s[output].split(co, 8)
-    (kh_kw_ci, ) = s[output].op.reduce_axis
-    s[output].reorder(n, h, w, co, vh, vw, kh_kw_ci, vc)
-    K = get_const_int(kh_kw_ci.dom.extent)
+    (kh, kw, ci) = s[output].op.reduce_axis
+    s[output].reorder(n, h, w, co, vh, vw, kh, kw, ci, vc)
+    KH, KW, CI = get_const_int(kh.dom.extent), get_const_int(kw.dom.extent), get_const_int(ci.dom.extent)
 
+    print("VW: ", VW)
     if VW % 4 == 0:
         (vwo, vwi) = s[output].split(vw, 4)
-        s[output].tensorize(vwi, _intrin_Kx4xint8_Kx8xint8_4x8_int32(K))
+        s[output].tensorize(vwi, _intrin_Kx4xint8_Kx8xint8_4x8_int32(KH, KW, CI))
+        s[output].unroll(vwo)
+        s[output].unroll(vh)
+    elif VW % 3 == 0:
+        (vwo, vwi) = s[output].split(vw, 3)
+        # s[output].tensorize(vwi, _intrin_Kx3xint8_Kx8xint8_3x8_int32(KH, KW, CI))
         s[output].unroll(vwo)
         s[output].unroll(vh)
 
     cfg.define_knob('data_vec_compute_at', [0, 1, 2])
     s[data_vec].compute_at(s[output], [n, h, w][cfg['data_vec_compute_at'].val])
-
-    if kernel_vec.op.name == 'kernel_vec':
-        if autotvm.GLOBAL_SCOPE.in_tuning:
-            s[kernel_vec].pragma(s[kernel_vec].op.axis[0], 'debug_skip_region')
-        else:
-            pass
     return s

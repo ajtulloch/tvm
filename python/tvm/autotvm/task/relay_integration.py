@@ -73,12 +73,7 @@ def extract_from_program(func, params, ops, target, target_host=None):
     tracing_target = _target.create("llvm -device=tracing")
     relay.backend.compile_engine.get().clear()
     # wrap build call in thread to avoid multiprocessing problems
-    build_thread = threading.Thread(target=relay.build, args=(func,
-                                                              tracing_target,
-                                                              target_host,
-                                                              params))
-    build_thread.start()
-    build_thread.join()
+    relay.build(func, tracing_target, target_host, params)
     logger.disabled = old_state
 
     # create tasks for target

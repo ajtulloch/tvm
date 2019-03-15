@@ -15,6 +15,7 @@ from ... import _api_internal, tensor, placeholder, create_schedule
 
 from .task import args_to_workload, dispatcher, register
 from ..util import get_const_tuple
+import logging
 
 # A table that records all registered dispatcher for all targets
 _REGISTERED_DISPATCHER = {
@@ -91,7 +92,6 @@ class TaskExtractEnv:
         for topi_compute in self.topi_to_task:
             def _local_scope(compute_func):
                 """start a scope to hold the local function in for loop"""
-
                 @compute_func.register("tracing", )
                 def _tracing_topi_compute(*args, **kwargs):
                     assert not kwargs, "Do not support extracting tuning tasks when" \
@@ -99,6 +99,7 @@ class TaskExtractEnv:
                                        "Please modify it to use only positional args."
 
                     if compute_func in self.wanted_topi_funcs:  # record this call
+                        logging.debug("Got compute func, %s, %s", compute_func, args)
                         key = (self.topi_to_task[compute_func], serialize_args(args))
                         if key not in self.task_collection:
                             self.task_collection.append(key)
@@ -129,9 +130,12 @@ class TaskExtractEnv:
             args = deserialize_args(args)
             A, W = args[:2]
             layout = args[-2]
-            assert layout == 'NCHW', "only support NCHW currently"
             C = topi.nn.conv2d(*args, **kwargs)
-            s = topi.generic.schedule_conv2d_nchw([C])
+            assert layout in ("NCHW", "NHWC")
+            if layout == 'NCHW':
+                s = topi.generic.schedule_conv2d_nchw([C])
+            elif layout == "NHWC":
+                s = topi.generic.schedule_conv2d_nhwc([C])
             return s, [A, W, C]
 
         @register("topi_nn_depthwise_conv2d_nchw")

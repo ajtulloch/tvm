@@ -282,6 +282,8 @@ def _topi_nn_conv2d_NCHWc(*args, **kwargs):
 
 @conv2d_alter_layout.register("cpu")
 def _alter_conv2d_layout(attrs, inputs, tinfo, F):
+    import ipdb
+    ipdb.set_trace()
     import nnvm.symbol as sym
 
     copy_inputs = [s for s in inputs]

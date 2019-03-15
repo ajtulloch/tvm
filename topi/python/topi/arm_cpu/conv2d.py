@@ -14,6 +14,7 @@ from ..util import traverse_inline, get_const_tuple, const_matrix
 from ..nn import dilate, pad, conv2d, conv2d_alter_layout, \
                  conv2d_winograd_without_weight_transform, depthwise_conv2d_nchw
 from ..nn.util import get_const_int, get_pad_tuple
+from . import conv2d_int8
 
 @autotvm.register_topi_compute(conv2d, 'arm_cpu', ['direct'])
 def conv2d_arm_cpu(cfg, data, kernel, strides, padding, dilation, layout, out_dtype):
@@ -104,6 +105,9 @@ def schedule_conv2d_nchw_arm_cpu(cfg, outs):
 
 
 def _decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out_dtype, num_tile):
+    if layout == "NHWC" and out_dtype == "int32":
+        return conv2d_int8.decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out_dtype, num_tile)
+
     assert layout == "NCHW", "Only support NCHW"
     # create workload according to raw arguments
     out_dtype = out_dtype or data.dtype
@@ -564,9 +568,15 @@ def _alter_conv2d_layout_arm(attrs, inputs, tinfos, F):
         warnings.warn("Does not support weight pre-transform for dilated convolution.")
         return None
 
+
     data, kernel = tinfos[0:2]
     N, CI, H, W = get_const_tuple(data.shape)
     CO, _, KH, KW = get_const_tuple(kernel.shape)
+
+    if data.dtype == "int8" and CO % 8 == 0:
+        new_attrs['kernel_layout'] = 'HWIO'
+        new_attrs[data_layout_key] = 'NHWC'
+        return F.nn.conv2d(*copy_inputs, **new_attrs)
 
     if groups == 1:
         # query config of this workload

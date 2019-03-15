@@ -158,6 +158,8 @@ def optimize(func, target=None, params=None):
     # bind expressions
     if params:
         func = _bind_params_by_name(func, params)
+    print("Before SimplifyInference")
+    print(func.astext(show_meta_data=False))
 
     if cfg.pass_enabled("SimplifyInference"):
         func = ir_pass.infer_type(func)
@@ -188,6 +190,8 @@ def optimize(func, target=None, params=None):
         func = ir_pass.infer_type(func)
         func = ir_pass.forward_fold_scale_axis(func)
         func = ir_pass.fold_constant(func)
+    print("Before CanonicalizeOps")
+    print(func.astext(show_meta_data=False))
 
     if cfg.pass_enabled("CanonicalizeOps"):
         func = ir_pass.infer_type(func)
@@ -196,6 +200,9 @@ def optimize(func, target=None, params=None):
     # FIXME(zhiics) Skip AlterOpLayout pass for heterogeneous compilation for
     # now. We probably need to pass target to this pass as well. Fix it in
     # a followup PR.
+    print("Before AlterOpLayout")
+    print(func.astext(show_meta_data=False))
+
     if cfg.pass_enabled("AlterOpLayout"):
         if isinstance(target, _target.Target):
             func = ir_pass.infer_type(func)
@@ -273,6 +280,9 @@ def build(func, target=None, target_host=None, params=None):
     cfg = BuildConfig.current
 
     with tophub_context:
+        print("Before Optimize")
+        print(func.astext(show_meta_data=False))
+
         func = optimize(func, target, params)
         # Annotate the ops for heterogeneous execution.
         if isinstance(target, dict):
@@ -280,9 +290,15 @@ def build(func, target=None, target_host=None, params=None):
                                                          fallback_device)
         # Fuse ops before running code gen
         func = ir_pass.infer_type(func)
+        print("Before Fuse ops")
+        print(func.astext(show_meta_data=False))
+
         func = ir_pass.fuse_ops(func, cfg.opt_level)
         # Graph code generation
         func = ir_pass.infer_type(func)
+        print("Before compile")
+        print(func.astext(show_meta_data=False))
+
         graph_gen = _graph_gen.GraphRuntimeCodegen(mod=None, target=target)
         graph_json, lowered_funcs, params = graph_gen.codegen(func)
         mod = _tvm_build_module(

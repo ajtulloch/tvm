@@ -324,6 +324,7 @@ reg.register_pattern("nn.contrib_conv2d_winograd_weight_transform",
 @reg.register_compute("nn.contrib_conv2d_NCHWc")
 def compute_contrib_conv2d_NCHWc(attrs, inputs, out_dtype, target):
     """Compute definition of conv2d NCHWc"""
+    import ipdb; ipdb.set_trace()
     # pylint: disable=assignment-from-no-return
     padding = attrs.get_int_tuple("padding")
     strides = attrs.get_int_tuple("strides")

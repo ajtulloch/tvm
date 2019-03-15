@@ -46,6 +46,7 @@ def conv2d(input, filter, strides, padding, dilation, layout='NCHW', out_dtype=N
     """
     # search platform specific declaration first
     # default declaration
+    print("In nn.conv2d", input.shape, filter.shape)
     if layout == 'NCHW':
         return conv2d_nchw(input, filter, strides, padding, dilation, out_dtype)
     if layout == 'HWCN':

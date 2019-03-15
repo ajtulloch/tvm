@@ -2,6 +2,8 @@
 from __future__ import absolute_import
 from .. import cpp
 
+import tvm
+
 POOL_TYPE_CODE = {
     "avg": 0,
     "max": 1
@@ -97,3 +99,26 @@ def pool(data,
     """
     return cpp.nn.pool(data, kernel, stride, padding,
                        POOL_TYPE_CODE[pool_type], ceil_mode, layout, count_include_pad)
+
+@tvm.target.generic_func
+def max_pool2d_alter_layout(attrs, inputs, tinfos, F):
+    """Change MaxPool2D layout.
+
+    Parameters
+    ----------
+    attrs : nnvm.top.AttrDict or tvm.attrs.Attrs
+        Attributes of current convolution
+    inputs : nnvm.symbol or tvm.relay.Expr
+        Grouped input symbols
+    tinfos : list
+        Input shape and dtype
+    F: symbol
+        The context, can be either nnvm.sym or relay.op
+
+    Note
+    ----
+    Unlike other TOPI functions, this function operates on both graph level and operator level,
+    so we have to pass 'F' to make it support our two versions of graph IR, NNVM and Relay.
+    """
+    # not to change by default
+    return None

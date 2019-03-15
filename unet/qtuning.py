@@ -108,40 +108,40 @@ def run(align, model, autotvm_number, autotvm_repeat, autotvm_log,
         qgraph = relay.ir_pass.infer_type(qgraph)
         print("Optimized graph")
         print(qgraph.astext(show_meta_data=False))
-    # with relay.build_config(opt_level=opt_level):
-    #     qgraph_json, lib, params = relay.build(qgraph, target, params=params)
-    # import netron
-    # import tempfile
-    # with tempfile.NamedTemporaryFile(delete=False, suffix="tvm.json") as f:
-    #     f.write(qgraph_json)
-    # netron.start(f.name, host="localhost")
-    with target:
-        with relay.build_config(opt_level=opt_level):
-            qgraph_json, lib, params = relay.build(qgraph, target, params=params)
+    with relay.build_config(opt_level=opt_level):
+        qgraph_json, lib, params = relay.build(qgraph, target, params=params)
+    import netron
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, suffix="tvm.json") as f:
+        f.write(qgraph_json)
+    netron.start(f.name, host="localhost")
+    # with target:
+    #     with relay.build_config(opt_level=opt_level):
+    #         qgraph_json, lib, params = relay.build(qgraph, target, params=params)
 
-    with target:
-        with relay.build_config(opt_level=2):
-            tasks = autotvm.task.extract_from_program(
-                qgraph, target=target, params=params, ops=(relay.op.nn.conv2d, ))
-    tasks = list(reversed(tasks))
-    logging.info("Got %s tasks", len(tasks))
-    for i, task in enumerate(tasks):
-        logging.info("Task %s: %s", i, task)
-    # tasks = tasks[1:]
-    tune_tasks(
-        tasks,
-        measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(timeout=50),
-            runner=autotvm.RPCRunner(
-                device,
-                '0.0.0.0',
-                tracker_port,
-                number=autotvm_number,
-                repeat=autotvm_repeat,
-                timeout=50)),
-        n_trial=autotvm_n_trial,
-        early_stopping=autotvm_early_stopping,
-        log_filename=str(autotvm_log))
+    # with target:
+    #     with relay.build_config(opt_level=2):
+    #         tasks = autotvm.task.extract_from_program(
+    #             qgraph, target=target, params=params, ops=(relay.op.nn.conv2d, ))
+    # tasks = list(reversed(tasks))
+    # logging.info("Got %s tasks", len(tasks))
+    # for i, task in enumerate(tasks):
+    #     logging.info("Task %s: %s", i, task)
+    # # tasks = tasks[1:]
+    # tune_tasks(
+    #     tasks,
+    #     measure_option=autotvm.measure_option(
+    #         builder=autotvm.LocalBuilder(timeout=50),
+    #         runner=autotvm.RPCRunner(
+    #             device,
+    #             '0.0.0.0',
+    #             tracker_port,
+    #             number=autotvm_number,
+    #             repeat=autotvm_repeat,
+    #             timeout=50)),
+    #     n_trial=autotvm_n_trial,
+    #     early_stopping=autotvm_early_stopping,
+    #     log_filename=str(autotvm_log))
 
 
 if __name__ == '__main__':

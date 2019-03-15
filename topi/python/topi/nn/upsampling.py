@@ -1,6 +1,7 @@
 """TVM operator upsampling compute."""
 from __future__ import absolute_import
 import topi
+import tvm
 from ..util import simplify
 
 
@@ -39,3 +40,27 @@ def upsampling(data, scale, layout="NCHW", method='NEAREST_NEIGHBOR'):
         raise ValueError("not support this layout {} yet".format(layout))
 
     return topi.cpp.nn.upsampling(data, out_shape, layout, method)
+
+
+@tvm.target.generic_func
+def upsampling_alter_layout(attrs, inputs, tinfos, F):
+    """Change Upsampling layout.
+
+    Parameters
+    ----------
+    attrs : nnvm.top.AttrDict or tvm.attrs.Attrs
+        Attributes of current convolution
+    inputs : nnvm.symbol or tvm.relay.Expr
+        Grouped input symbols
+    tinfos : list
+        Input shape and dtype
+    F: symbol
+        The context, can be either nnvm.sym or relay.op
+
+    Note
+    ----
+    Unlike other TOPI functions, this function operates on both graph level and operator level,
+    so we have to pass 'F' to make it support our two versions of graph IR, NNVM and Relay.
+    """
+    # not to change by default
+    return None

@@ -34,33 +34,33 @@ def conv_resize(x, f, y):
     r = resize(c)
     return r + y
 
-# def unet(alignment=None):
-#     data = mx.sym.Variable(name='data')
-
-#     def align(x):
-#         return x if not alignment else ((x + alignment - 1) // alignment) * alignment
-
-#     (r0, p0) = conv_pool(data, align(12))  # 96x96
-#     (r1, p1) = conv_pool(r0, align(24))  # 48x48
-#     (r2, p2) = conv_pool(r1, align(48))  # 24x24
-#     (r3, p3) = conv_pool(r2, align(96))  # 12x12
-#     (r4, p4) = conv_pool(r3, align(180))  # 6x6
-#     r5 = conv_relu(r4, align(220))  # 6x6
-#     r6 = relu(conv_resize(r5, align(180), p4))
-#     r7 = relu(conv_resize(r6, align(96), p3))
-#     r8 = relu(conv_resize(r7, align(48), p2))
-#     r9 = relu(conv_resize(r8, align(24), p1))
-#     r10 = relu(conv_resize(r9, align(12), p0))
-#     r11 = conv(r10, 1)
-#     s = sigmoid(r11)
-#     return conv(s, 1)
-
 def unet(alignment=None):
     data = mx.sym.Variable(name='data')
 
     def align(x):
         return x if not alignment else ((x + alignment - 1) // alignment) * alignment
-    return conv(data, 1)
+
+    (r0, p0) = conv_pool(data, align(12))  # 96x96
+    (r1, p1) = conv_pool(r0, align(24))  # 48x48
+    (r2, p2) = conv_pool(r1, align(48))  # 24x24
+    (r3, p3) = conv_pool(r2, align(96))  # 12x12
+    (r4, p4) = conv_pool(r3, align(180))  # 6x6
+    r5 = conv_relu(r4, align(220))  # 6x6
+    r6 = relu(conv_resize(r5, align(180), p4))
+    r7 = relu(conv_resize(r6, align(96), p3))
+    r8 = relu(conv_resize(r7, align(48), p2))
+    r9 = relu(conv_resize(r8, align(24), p1))
+    r10 = relu(conv_resize(r9, align(12), p0))
+    r11 = conv(r10, 1)
+    s = sigmoid(r11)
+    return conv(s, 1)
+
+# def unet(alignment=None):
+#     data = mx.sym.Variable(name='data')
+
+#     def align(x):
+#         return x if not alignment else ((x + alignment - 1) // alignment) * alignment
+#     return conv(data, 1)
 
 
 # def unet_small(align_8=False):

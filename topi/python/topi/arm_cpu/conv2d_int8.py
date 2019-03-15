@@ -162,8 +162,10 @@ extern "C" void gemm_ukernel_3x8__neon_asm(
 }
     """
     from tvm.contrib import clang
-    z = clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"], output="/tmp/x.ll")
-    return "/tmp/x.ll"
+    import tempfile
+    f = tempfile.NamedTemporaryFile(delete=False, suffix=".tvm.ll")
+    z = clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"], output=f.name)
+    return f.name
 
 def intrin_4x8_gemm_neon_ir():
     import os
@@ -336,9 +338,10 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
 }
     """
     from tvm.contrib import clang
-    z = clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"], output="/tmp/x.ll")
-    print(clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"]))
-    return "/tmp/x.ll"
+    import tempfile
+    f = tempfile.NamedTemporaryFile(delete=False, suffix=".tvm.ll")
+    z = clang.create_llvm(src, options=["-O3", "--target=armv7-none-linux-gnueabihf"], output=f.name)
+    return f.name
 
 # M == 4 input width
 # N == 8 output channels.
@@ -346,6 +349,7 @@ extern "C" void gemm_ukernel_4x8__neon_asm(
 
 def _intrin_Kx3xint8_Kx8xint8_3x8_int32(KH, KW, CI):
     K = KH * KW * CI
+    assert K % 8 == 0
     X = tvm.placeholder((3, K), dtype="int8", name='X')
     W = tvm.placeholder((KH, KW, CI, 8), dtype="int8", name='X')
     kh = tvm.reduce_axis((0, KH), name='kh')
@@ -395,6 +399,7 @@ def _intrin_Kx3xint8_Kx8xint8_3x8_int32(KH, KW, CI):
 
 def _intrin_Kx4xint8_Kx8xint8_4x8_int32(KH, KW, CI):
     K = KH * KW * CI
+    assert K % 8 == 0
     X = tvm.placeholder((4, K), dtype="int8", name='X')
     W = tvm.placeholder((KH, KW, CI, 8), dtype="int8", name='X')
     kh = tvm.reduce_axis((0, KH), name='kh')
@@ -464,9 +469,15 @@ def decl_spatial_pack(cfg, data, kernel, strides, padding, dilation, layout, out
     # ow, vw = cfg.define_split(
     #     'tile_ow', cfg.axis(OW), num_outputs=2,
     #     filter=lambda x: x.size[-1] % 4 == 0 if OW % 4 == 0 else True)
+    def valid_vw(vw):
+        if OW % 4 == 0:
+            return vw == 4
+        if OW % 3 == 0:
+            return vw == 3
+        return True
+
     ow, vw = cfg.define_split(
-        'tile_ow', cfg.axis(OW), num_outputs=2,
-        filter=lambda x: x.size[-1] == 4 if OW % 4 == 0 else True)
+        'tile_ow', cfg.axis(OW), num_outputs=2, filter=lambda x: valid_vw(x.size[-1]))
     oh, vh = cfg.define_split('tile_oh', cfg.axis(OH), num_outputs=2)
     VH = cfg["tile_oh"].size[-1]
     VW = cfg["tile_ow"].size[-1]
@@ -606,16 +617,17 @@ def _schedule_spatial_pack_NHWC(cfg, s, output, last):
     s[output].reorder(n, h, w, co, vh, vw, kh, kw, ci, vc)
     KH, KW, CI = get_const_int(kh.dom.extent), get_const_int(kw.dom.extent), get_const_int(ci.dom.extent)
 
-    print("VW: ", VW)
     if VW % 4 == 0:
-        (vwo, vwi) = s[output].split(vw, 4)
-        s[output].tensorize(vwi, _intrin_Kx4xint8_Kx8xint8_4x8_int32(KH, KW, CI))
-        s[output].unroll(vwo)
+        assert VW == 4
+        # (vwo, vwi) = s[output].split(vw, 4)
+        s[output].tensorize(vw, _intrin_Kx4xint8_Kx8xint8_4x8_int32(KH, KW, CI))
+        # s[output].unroll(vwo)
         s[output].unroll(vh)
     elif VW % 3 == 0:
-        (vwo, vwi) = s[output].split(vw, 3)
-        # s[output].tensorize(vwi, _intrin_Kx3xint8_Kx8xint8_3x8_int32(KH, KW, CI))
-        s[output].unroll(vwo)
+        assert VW == 3
+        # (vwo, vwi) = s[output].split(vw, 3)
+        s[output].tensorize(vw, _intrin_Kx3xint8_Kx8xint8_3x8_int32(KH, KW, CI))
+        # s[output].unroll(vwo)
         s[output].unroll(vh)
 
     cfg.define_knob('data_vec_compute_at', [0, 1, 2])

@@ -64,8 +64,8 @@ def tune_tasks(tasks,
 @click.option('--align', default=8)
 @click.option(
     '--model', type=click.Choice(['unet', 'resnet50']), required=True)
-@click.option('--autotvm_number', default=10)
-@click.option('--autotvm_repeat', default=2)
+@click.option('--autotvm_number', default=50)
+@click.option('--autotvm_repeat', default=4)
 @click.option('--autotvm_n_trial', default=200)
 @click.option('--autotvm_early_stopping', default=100)
 @click.option('--autotvm_log', default="autotvm_unet_tuning.log", type=str)
@@ -76,7 +76,7 @@ def tune_tasks(tasks,
 def run(align, model, autotvm_number, autotvm_repeat, autotvm_log,
         autotvm_n_trial, autotvm_early_stopping, tracker_port, opt_level,
         device):
-    logging.basicConfig(level=logging.DEBUG)
+    logging.basicConfig(level=logging.INFO)
     target = dict(skl=skl_target, rpi=rpi_target, local=local_target)[device]
     print(target)
     sym, image_shape, output_shape = models.get_mxnet_symbol(model, align)
@@ -131,14 +131,14 @@ def run(align, model, autotvm_number, autotvm_repeat, autotvm_log,
     tune_tasks(
         tasks,
         measure_option=autotvm.measure_option(
-            builder=autotvm.LocalBuilder(timeout=1000),
+            builder=autotvm.LocalBuilder(timeout=100),
             runner=autotvm.RPCRunner(
                 device,
                 '0.0.0.0',
                 tracker_port,
                 number=autotvm_number,
                 repeat=autotvm_repeat,
-                timeout=1000)),
+                timeout=100)),
         n_trial=autotvm_n_trial,
         early_stopping=autotvm_early_stopping,
         log_filename=str(autotvm_log))

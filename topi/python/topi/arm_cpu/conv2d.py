@@ -573,7 +573,7 @@ def _alter_conv2d_layout_arm(attrs, inputs, tinfos, F):
     N, CI, H, W = get_const_tuple(data.shape)
     CO, _, KH, KW = get_const_tuple(kernel.shape)
 
-    if data.dtype == "int8" and CO % 8 == 0:
+    if data.dtype == "int8" and CO % 8 == 0 and CI % 8 == 0:
         new_attrs['kernel_layout'] = 'OHWI8o'
         new_attrs[data_layout_key] = 'NHWC'
         return F.nn.conv2d(*copy_inputs, **new_attrs)

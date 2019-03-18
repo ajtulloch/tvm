@@ -74,5 +74,6 @@ def dense_alter_layout(attrs, inputs, tinfos):
     tinfos : list
         Input shape and dtype
     """
+    import ipdb; ipdb.set_trace()
     # not to change by default
     return None

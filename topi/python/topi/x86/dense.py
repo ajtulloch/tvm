@@ -43,8 +43,10 @@ def dense(cfg, data, weight, bias=None):
     batch, in_dim = get_const_tuple(data.shape)
     out_dim, _ = get_const_tuple(weight.shape)
     cfg.define_knob('blas', ALGORITHMS)
-    cfg.define_split("tile_y", cfg.axis(out_dim), policy="candidate", num_outputs=2,
-                     candidate=[(in_dim / (8 * i), 8 * i) for i in range(1, 16)])
+    cfg.define_split(
+        "tile_y",
+        cfg.axis(out_dim), policy="candidate", num_outputs=2,
+        filter=lambda x: x.size[-1] % 16 == 0)
 
 
     f = [dense_direct, dense_blas, dense_blas_pretranspose, dense_direct_pretranspose][cfg['blas'].val]
@@ -199,7 +201,6 @@ def schedule_dense_pretranspose_tvm(s, cfg, op, out):
     k = s[C].op.reduce_axis[0]
     (M, N) = get_const_tuple(C.shape)
     K = get_const_int(k.dom.extent)
-    print("BLAS", M, N, K)
     xa = cfg.axis(M)
     ya = cfg.axis(N)
     ka = cfg.axis(K)

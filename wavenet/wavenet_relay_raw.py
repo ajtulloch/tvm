@@ -1,6 +1,7 @@
 import tvm
 import topi
 from tvm import relay
+from tvm import autotvm
 
 import tvm.contrib.debugger.debug_runtime as debug_runtime
 import tvm.contrib.graph_runtime as graph_runtime
@@ -113,20 +114,59 @@ inputs = collections.OrderedDict(
 logging.basicConfig(level=logging.DEBUG)
 skl_target = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
 
-with relay.build_config(opt_level=3):
-    func = relay.optimize(func, target=skl_target, params=params)
-    print(func.astext(show_meta_data=False))
-    func = relay.ir_pass.infer_type(func)
-    graph, lib, new_params = relay.build_module.build(
-        func, target=skl_target,  params=params)
 
-    for (k, v) in params.items():
-        print(k, v.shape)
-    for (k, v) in new_params.items():
-        print(k, v.shape)
-    with tempfile.NamedTemporaryFile(delete=False, suffix="tvm.json") as f:
-        f.write(graph.encode())
-    netron.start(f.name, host="localhost")
+def tune():
+    global func
+    with relay.build_config(opt_level=3):
+        func = relay.optimize(func, target=skl_target, params=params)
+        print(func.astext(show_meta_data=False))
+        tasks = autotvm.task.extract_from_program(
+            func, target=skl_target, params=params, ops=(relay.op.nn.dense,))
+        for i, tsk in enumerate(tasks):
+            print(tsk)
+            prefix = "[Task %2d/%2d] " % (i + 1, len(tasks))
+
+            tuner_obj = autotvm.tuner.XGBTuner(tsk, loss_type='rank', feature_type="knob")
+            n_trial = 1000
+            early_stopping = 200
+            measure_option = autotvm.measure_option(
+                builder=autotvm.LocalBuilder(),
+                runner=autotvm.RPCRunner(
+                    'skl',
+                    '0.0.0.0',
+                    9195,
+                    number=100,
+                    repeat=5,
+                    min_repeat_ms=1000,
+                    timeout=100)
+            )
+            log_filename = "synthesis_autotvm_skl.log"
+            tuner_obj.tune(
+                n_trial=min(n_trial, len(tsk.config_space)),
+                early_stopping=early_stopping,
+                measure_option=measure_option,
+                callbacks=[
+                    autotvm.callback.progress_bar(n_trial, prefix=prefix),
+                    autotvm.callback.log_to_file(log_filename)
+                ])
+
+if 0:
+    tune()
+with autotvm.apply_history_best("synthesis_autotvm_skl.log"):
+    with relay.build_config(opt_level=3):
+        func = relay.optimize(func, target=skl_target, params=params)
+        print(func.astext(show_meta_data=False))
+        func = relay.ir_pass.infer_type(func)
+        graph, lib, new_params = relay.build_module.build(
+            func, target=skl_target,  params=params)
+
+        for (k, v) in params.items():
+            print(k, v.shape)
+        for (k, v) in new_params.items():
+            print(k, v.shape)
+        with tempfile.NamedTemporaryFile(delete=False, suffix="tvm.json") as f:
+            f.write(graph.encode())
+        netron.start(f.name, host="localhost")
 
 
 tmp = tvm.contrib.util.tempdir()
@@ -139,10 +179,15 @@ remote = tracker.request('skl')
 remote.upload(lib_fname)
 rlib = remote.load_module('net.tar')
 ctx = remote.cpu(0)
-module = graph_runtime.create(graph, rlib, ctx)
-
 r_new_params = {k: tvm.nd.array(v, ctx) for k, v in new_params.items()}
 r_inputs = {k: tvm.nd.array(v, ctx) for k, v in inputs.items()}
+module = graph_runtime.create(graph, rlib, ctx)
+module.set_input(**r_new_params)
+module.set_input(**r_inputs)
+ftimer = module.module.time_evaluator("run", ctx, 10000)
+for i in range(5):
+    prof_res = ftimer()
+    print("TVM time: ", prof_res.mean)
 
 module = debug_runtime.create(graph, rlib, ctx)
 module.set_input(**r_new_params)
@@ -154,10 +199,3 @@ module.run()
 module.run()
 module.run()
 
-module = graph_runtime.create(graph, rlib, ctx)
-module.set_input(**r_new_params)
-module.set_input(**r_inputs)
-ftimer = module.module.time_evaluator("run", ctx, 10000)
-for i in range(5):
-    prof_res = ftimer()
-    print("TVM time: ", prof_res.mean)

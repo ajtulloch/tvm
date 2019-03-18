@@ -345,6 +345,9 @@ def _build_func_common(measure_input, check_gpu=None, cuda_arch=None, build_opti
             set_cuda_target_arch(cuda_arch)
 
         with build_config(**opts):
+            import tvm
+            import logging
+            logging.debug(tvm.lower(s, args, simple_mode=True))
             func = build(s, args, target_host=task.target_host)
     return func, tuple((get_const_tuple(x.shape), x.dtype) for x in args)
 

@@ -42,6 +42,14 @@ def get_lib_path():
 
 LIB_LIST, __version__ = get_lib_path()
 
+def is_platform_mac():
+    return sys.platform == 'darwin'
+
+# Ensure we generate code for OS X 10.9
+if is_platform_mac():
+    if 'MACOSX_DEPLOYMENT_TARGET' not in os.environ:
+        os.environ['MACOSX_DEPLOYMENT_TARGET'] = '10.9'
+
 def config_cython():
     """Try to configure cython and return cython configuration"""
     if os.name == 'nt':

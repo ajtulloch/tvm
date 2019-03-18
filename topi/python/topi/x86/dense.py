@@ -1,208 +1,296 @@
-# pylint: disable=invalid-name,too-many-locals,unused-variable
-"""x86 dense operators"""
+# pylint: disable=invalid-name,unused-variable
+"""dense schedule on ARM Mali GPU"""
+
 from __future__ import absolute_import as _abs
+
 import tvm
 from tvm import autotvm
-from tvm.autotvm.task.space import SplitEntity
+import copy
+from .. import generic, nn, tag
+from ..util import traverse_inline, get_const_tuple, get_const_int
+import numpy as np
 
-from .util import get_fp32_len
-from .. import generic, tag, nn
-from ..util import traverse_inline, get_const_tuple
+from tvm.contrib import cblas
+from .check_targets import fp32_vector_width
 
-@autotvm.register_topi_compute(nn.dense, "cpu", "direct")
-def _declaration_dense(cfg, data, weight, bias=None):
-    batch, _ = get_const_tuple(data.shape)
+[TVM, BLAS, BLAS_PRETRANSPOSED, TVM_PRETRANSPOSED] = ALGORITHMS = range(4)
 
-    # For small batch sizes, don't pack weight into cache-friendly layout
-    # because of overhead in packing and limited reuse from batch dimension
-    # TODO(icemelon9): use a more systematic way to determine which schedule to use
-    if batch <= 16:
-        return _declaration_dense_nopack(cfg, data, weight, bias)
-    return _declaration_dense_pack(cfg, data, weight, bias)
+@autotvm.register_topi_compute(nn.dense, 'cpu', ['direct'])
+def dense(cfg, data, weight, bias=None):
+    """The default implementation of dense in topi.
 
+    Parameters
+    ----------
+    data : tvm.Tensor
+        2-D with shape [batch, in_dim]
 
-# Declare dense compute with packing weight into cache-friendly layout
-@autotvm.register_topi_compute(nn.dense, "cpu", "direct_pack")
-def _declaration_dense_pack(cfg, data, weight, bias=None):
+    weight : tvm.Tensor
+        2-D with shape [out_dim, in_dim]
+
+    bias : tvm.Tensor, optional
+        1-D with shape [out_dim]
+
+    Returns
+    -------
+    output : tvm.Tensor
+        2-D with shape [batch, out_dim]
+    """
+    assert len(data.shape) == 2 and len(weight.shape) == 2, \
+        "only support 2-dim dense"
+    if bias is not None:
+        assert len(bias.shape) == 1
+
     batch, in_dim = get_const_tuple(data.shape)
     out_dim, _ = get_const_tuple(weight.shape)
-    # create tuning space
-    cfg.define_split("tile_y", batch, num_outputs=3)
-    cfg.define_split("tile_x", out_dim, num_outputs=3)
-    cfg.define_split("tile_k", in_dim, num_outputs=2)
-    if cfg.is_fallback:
-        _default_dense_pack_config(cfg, batch, out_dim, in_dim)
+    cfg.define_knob('blas', ALGORITHMS)
+    cfg.define_split("tile_y", cfg.axis(out_dim), policy="candidate", num_outputs=2,
+                     candidate=[(in_dim / (8 * i), 8 * i) for i in range(1, 16)])
 
-    packw_bn = cfg["tile_x"].size[-1]
-    packw_shape = (out_dim // packw_bn, in_dim, packw_bn)
-    packw = tvm.compute(packw_shape,
-                        lambda z, y, x: weight[z * packw_bn + x, y], name="packed_weight")
 
-    k = tvm.reduce_axis((0, in_dim), name="k")
-    C = tvm.compute((batch, out_dim),
-                    lambda y, x: tvm.sum(
-                        data[y, k] * packw[x // packw_bn, k, x % packw_bn],
-                        axis=k),
-                    tag="dense_pack")
+    f = [dense_direct, dense_blas, dense_blas_pretranspose, dense_direct_pretranspose][cfg['blas'].val]
+    matmul = f(cfg, data, weight, bias)
+    cfg.add_flop(2 * batch * in_dim * out_dim)
     if bias is not None:
-        C = tvm.compute((batch, out_dim), lambda i, j: C[i, j] + bias[j],
-                        tag=tag.BROADCAST)
-    return C
+        cfg.add_flop(batch * out_dim)
+    return matmul
+
+@autotvm.register_topi_compute(nn.dense, 'cpu', ['pretransposed'])
+def dense(cfg, data, weight, bias=None):
+    """The default implementation of dense in topi.
+
+    Parameters
+    ----------
+    data : tvm.Tensor
+        2-D with shape [batch, in_dim]
+
+    weight : tvm.Tensor
+        2-D with shape [out_dim, in_dim]
+
+    bias : tvm.Tensor, optional
+        1-D with shape [out_dim]
+
+    Returns
+    -------
+    output : tvm.Tensor
+        2-D with shape [batch, out_dim]
+    """
+    assert len(data.shape) == 2 and len(weight.shape) == 2, \
+        "only support 2-dim dense"
+    if bias is not None:
+        assert len(bias.shape) == 1
+
+    batch, in_dim = get_const_tuple(data.shape)
+    _, out_dim = get_const_tuple(weight.shape)
+    assert cfg['blas'].val in (TVM_PRETRANSPOSED, BLAS_PRETRANSPOSED)
+    if cfg['blas'].val == BLAS_PRETRANSPOSED:
+        matmul = cblas.matmul(data, weight, transb=False, tag="dense_blas")
+    elif cfg['blas'].val == TVM_PRETRANSPOSED:
+        k = tvm.reduce_axis((0, in_dim), name='k')
+        matmul = tvm.compute(
+            (batch, out_dim),
+            lambda i, j: tvm.sum(data[i, k] * weight[k, j], axis=k),
+            tag='dense_pretranspose',
+            name="matmul",
+        )
+    if bias is not None:
+        matmul = tvm.compute(
+            (batch, out_dim),
+            lambda i, j: matmul[i, j] + bias[j],
+            name="bias_add",
+            tag=tag.BROADCAST
+        )
+    return matmul
 
 
-# Declare dense compute without packing weight
-@autotvm.register_topi_compute(nn.dense, "cpu", "direct_nopack")
-def _declaration_dense_nopack(cfg, data, weight, bias=None):
+def dense_direct(cfg, data, weight, bias):
     batch, in_dim = get_const_tuple(data.shape)
     out_dim, _ = get_const_tuple(weight.shape)
-    # create tuning space
-    cfg.define_split("tile_x", out_dim, num_outputs=2)
-    cfg.define_split("tile_y", batch, num_outputs=2)
-    cfg.define_split("tile_k", in_dim, num_outputs=2)
-    if cfg.is_fallback:
-        _default_dense_nopack_config(cfg, batch, out_dim, in_dim)
+    k = tvm.reduce_axis((0, in_dim), name='k')
 
-    vec = cfg["tile_k"].size[-1]
-    k = tvm.reduce_axis((0, in_dim // vec), "k")
-    CC = tvm.compute((batch, out_dim, vec),
-                     lambda z, y, x: tvm.sum(
-                         data[z, k * vec + x] * weight[y, k * vec + x], axis=k))
-
-    kk = tvm.reduce_axis((0, vec), "kk")
-    C = tvm.compute((batch, out_dim),
-                    lambda y, x: tvm.sum(CC[y, x, kk], axis=kk),
-                    tag="dense_nopack")
+    matmul = tvm.compute(
+        (batch, out_dim),
+        lambda i, j: tvm.sum(data[i, k] * weight[j, k], axis=k),
+        tag='dense',
+        name="matmul",
+    )
     if bias is not None:
-        C = tvm.compute((batch, out_dim), lambda i, j: C[i, j] + bias[j],
-                        tag=tag.BROADCAST)
+        matmul = tvm.compute(
+            (batch, out_dim),
+            lambda i, j: matmul[i, j] + bias[j],
+            name="bias_add",
+            tag=tag.BROADCAST
+        )
+    return matmul
 
-    return C
-
-
-@autotvm.register_topi_schedule(generic.schedule_dense, "cpu", "direct")
-def _schedule_dense(cfg, outs):
-    s = tvm.create_schedule([x.op for x in outs])
-
-    def _callback(op):
-        if "dense_pack" in op.tag:
-            _schedule_dense_pack_template(cfg, s, op.output(0))
-        elif 'dense_nopack' in op.tag:
-            _schedule_dense_nopack_template(cfg, s, op.output(0))
-    traverse_inline(s, outs[0].op, _callback)
-    return s
-
-
-@autotvm.register_topi_schedule(generic.schedule_dense, "cpu", "direct_pack")
-def _schedule_dense_pack(cfg, outs):
-    s = tvm.create_schedule([x.op for x in outs])
-
-    def _callback(op):
-        if "dense_pack" in op.tag:
-            _schedule_dense_pack_template(cfg, s, op.output(0))
-    traverse_inline(s, outs[0].op, _callback)
-    return s
+def dense_blas(cfg, data, weight, bias):
+    matmul = cblas.matmul(data, weight, transb=True, tag="dense_blas")
+    if bias is not None:
+        matmul = tvm.compute(
+            get_const_tuple(matmul.shape),
+            lambda i, j: matmul[i, j] + bias[j],
+            name="bias_add",
+            tag=tag.BROADCAST
+        )
+    return matmul
 
 
-@autotvm.register_topi_schedule(generic.schedule_dense, "cpu", "direct_nopack")
-def _schedule_dense_nopack(cfg, outs):
-    s = tvm.create_schedule([x.op for x in outs])
-
-    def _callback(op):
-        if 'dense_nopack' in op.tag:
-            _schedule_dense_nopack_template(cfg, s, op.output(0))
-    traverse_inline(s, outs[0].op, _callback)
-    return s
-
-
-def _schedule_dense_pack_template(cfg, s, C):
-    A, packedB = s[C].op.input_tensors
-
-    CC = s.cache_write(C, "global")
-    y, x = s[C].op.axis
-    k, = s[CC].op.reduce_axis
-
-    yt, yo, yi = cfg["tile_y"].apply(s, C, y)
-    xt, xo, xi = cfg["tile_x"].apply(s, C, x)
-    s[C].reorder(yt, xt, yo, xo, yi, xi)
-    xyt = s[C].fuse(yt, xt)
-    s[C].parallel(xyt)
-    xyo = s[C].fuse(yo, xo)
-    s[C].unroll(yi)
-    s[C].vectorize(xi)
-
-    s[CC].compute_at(s[C], xyo)
-    y, x = s[CC].op.axis
-    ko, ki = cfg["tile_k"].apply(s, CC, k)
-    s[CC].reorder(ko, ki, y, x)
-    s[CC].vectorize(x)
-    s[CC].unroll(y)
-    s[CC].unroll(ki)
-
-    z, y, x = s[packedB].op.axis
-    s[packedB].reorder(z, x, y)
-    s[packedB].parallel(z)
-    s[packedB].vectorize(y)
-    return s
+def dense_blas_pretranspose(cfg, data, weight, bias):
+    import topi
+    weight_T = topi.transpose(weight, [1, 0])
+    matmul = cblas.matmul(data, weight_T, transb=False, tag="dense_blas")
+    if bias is not None:
+        matmul = tvm.compute(
+            get_const_tuple(matmul.shape),
+            lambda i, j: matmul[i, j] + bias[j],
+            name="bias_add",
+            tag=tag.BROADCAST
+        )
+    return matmul
 
 
-def _schedule_dense_nopack_template(cfg, s, C):
-    y, x = s[C].op.axis
-    kk, = s[C].op.reduce_axis
+def dense_direct_pretranspose(cfg, data, weight, bias):
+    import topi
+    batch, in_dim = get_const_tuple(data.shape)
+    out_dim, _ = get_const_tuple(weight.shape)
+    k = tvm.reduce_axis((0, in_dim), name='k')
+    weight_T = topi.transpose(weight, [1, 0])
+    matmul = tvm.compute(
+        (batch, out_dim),
+        lambda i, j: tvm.sum(data[i, k] * weight_T[k, j], axis=k),
+        tag='dense_pretranspose',
+        name="matmul",
+    )
+    if bias is not None:
+        matmul = tvm.compute(
+            get_const_tuple(matmul.shape),
+            lambda i, j: matmul[i, j] + bias[j],
+            name="bias_add",
+            tag=tag.BROADCAST
+        )
+    return matmul
+
+def schedule_dense_tvm(s, cfg, op, out):
+    C = op.output(0)
+    A, B = op.input_tensors
+    x, y = s[C].op.axis
+    k = s[C].op.reduce_axis[0]
+    (M, N) = get_const_tuple(C.shape)
+    K = get_const_int(k.dom.extent)
+    xa = cfg.axis(M)
+    ya = cfg.axis(N)
+    ka = cfg.axis(K)
+
     yo, yi = cfg["tile_y"].apply(s, C, y)
-    xo, xi = cfg["tile_x"].apply(s, C, x)
-    s[C].reorder(yo, xo, yi, xi)
-    xyo = s[C].fuse(yo, xo)
-    s[C].parallel(xyo)
-    s[C].unroll(kk)
+    s[C].reorder(x, yo, k, yi)
+    s[C].vectorize(yi)
+    if op != out:
+        (x, y) = s[out].op.axis
+        yo, yi = cfg["tile_y"].apply(s, out, y)
+        s[out].vectorize(yi)
+        s[C].compute_at(s[out], yo)
 
-    CC, = s[C].op.input_tensors
-    s[CC].compute_at(s[C], xyo)
-    z, y, x = s[CC].op.axis
-    k, = s[CC].op.reduce_axis
-    yz = s[CC].fuse(z, y)
-    s[CC].reorder(k, yz, x)
-    s[CC].unroll(yz)
-    s[CC].vectorize(x)
+def schedule_dense_pretranspose_tvm(s, cfg, op, out):
+    C = op.output(0)
+    A, B = op.input_tensors
+    if autotvm.GLOBAL_SCOPE.in_tuning:
+        s[B].pragma(s[B].op.axis[0], "debug_skip_region")
+
+    x, y = s[C].op.axis
+    k = s[C].op.reduce_axis[0]
+    (M, N) = get_const_tuple(C.shape)
+    K = get_const_int(k.dom.extent)
+    print("BLAS", M, N, K)
+    xa = cfg.axis(M)
+    ya = cfg.axis(N)
+    ka = cfg.axis(K)
+
+    yo, yi = cfg["tile_y"].apply(s, C, y)
+    s[C].reorder(x, yo, k, yi)
+    s[C].vectorize(yi)
+    assert type(op) == type(out)
+    if op != out:
+        (x, y) = s[out].op.axis
+        yo, yi = cfg["tile_y"].apply(s, out, y)
+        s[out].vectorize(yi)
+        s[C].compute_at(s[out], yo)
+
+
+
+@autotvm.register_topi_schedule(generic.schedule_dense, 'cpu', ['direct', 'pretransposed'])
+def schedule_dense(cfg, outs):
+    """Schedule for dense operator.
+
+    Parameters
+    ----------
+    cfg: ConfigEntity
+        The config entity for this template
+    outs: Array of Tensor
+        The computation graph description of dense
+        in the format of an array of tensors.
+
+    Returns
+    -------
+    s: Schedule
+        The computation schedule for dense.
+    """
+    outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
+    s = tvm.create_schedule([x.op for x in outs])
+
+    def _callback(op):
+        if op.tag == 'dense_blas':
+            data, weight = op.input_tensors
+            if autotvm.GLOBAL_SCOPE.in_tuning and cfg['blas'].val == BLAS_PRETRANSPOSED:
+                s[weight].pragma(s[weight].op.axis[0], "debug_skip_region")
+            if outs[0].op != op:
+                (_, y) = s[outs[0].op].op.axis
+                yo, yi = cfg["tile_y"].apply(s, outs[0].op, y)
+                s[outs[0].op].vectorize(yi)
+
+        if op.tag == 'dense':
+            schedule_dense_tvm(s, cfg, op, outs[0].op)
+        if op.tag == 'dense_pretranspose':
+            schedule_dense_pretranspose_tvm(s, cfg, op, outs[0].op)
+
+    # TODO: autotune this?
+    (_, CO) = get_const_tuple(outs[0].shape)
+    if CO != 1:
+        assert isinstance(
+            outs[0].op, tvm.tensor.ComputeOp) or isinstance(
+            outs[0].op, tvm.tensor.ExternOp)
+    traverse_inline(s, outs[0].op, _callback)
+
     return s
 
+@nn.dense_alter_layout.register("cpu")
+def dense_alter_layout(attrs, inputs, tinfo):
+    import ipdb; ipdb.set_trace()
+    import nnvm.symbol as sym
+    dispatch_ctx = autotvm.task.DispatchContext.current
+    target = tvm.target.current_target()
+    # query schedule and fallback if necessary
+    workload = autotvm.task.args_to_workload(tinfo, nn.dense)
+    cfg = dispatch_ctx.query(target, workload)
+    if cfg.is_fallback:
+        return None
+    if cfg['blas'].val not in (BLAS_PRETRANSPOSED, TVM_PRETRANSPOSED):
+        return None
 
-def _default_dense_pack_config(cfg, M, N, K):
-    vec_width = get_fp32_len()
+    weights = tinfo[1]
+    transposed_weights = sym.transpose(
+        inputs[1],
+        axes=(1, 0),
+        # to work around unique name check in PrecomputePrune
+        name="weight_transpose_{}".format(np.random.randint(0, 1E8))
+    )
+    transposed_weights_placeholder = tvm.placeholder((weights.shape[1], weights.shape[0]),
+                                                     dtype=weights.dtype)
+    transposed_workload = autotvm.task.args_to_workload(
+        [tinfo[0], transposed_weights_placeholder, tinfo[2]], nn.dense)
+    transposed_inputs = [inputs[0], transposed_weights, inputs[2]]
+    transposed_cfg = copy.deepcopy(cfg)
+    transposed_cfg.template_key = "pretransposed"
+    dispatch_ctx.update(target, transposed_workload, transposed_cfg)
 
-    tilex_ii = 1
-    for bn in range(vec_width*2, 0, -1):
-        if N % bn == 0:
-            tilex_ii = bn
-            break
-    NN = N // tilex_ii
-    tilex_oi = 1
-    while NN // tilex_oi > 4:
-        if (NN // tilex_oi) % 2 == 1:
-            break
-        tilex_oi *= 2
+    ret = sym.dense(*transposed_inputs, **attrs)
 
-    tiley_ii = 8
-    while M % tiley_ii != 0:
-        tiley_ii //= 2
-    MM = M // tiley_ii
-    tiley_oi = 1
-    while MM // tiley_oi > 4:
-        if (MM // tiley_oi) % 2 == 1:
-            break
-        tiley_oi *= 2
-
-    cfg["tile_y"] = SplitEntity([MM // tiley_oi, tiley_oi, tiley_ii])
-    cfg["tile_x"] = SplitEntity([NN // tilex_oi, tilex_oi, tilex_ii])
-    cfg["tile_k"] = SplitEntity([K, 1])
-
-
-def _default_dense_nopack_config(cfg, M, N, K):
-    vec_width = get_fp32_len()
-    tilek_bn = 1
-    for bn in range(vec_width*2, 0, -1):
-        if K % bn == 0:
-            tilek_bn = bn
-            break
-    cfg["tile_k"] = SplitEntity([K // tilek_bn, tilek_bn])
-    cfg["tile_x"] = SplitEntity([N, 1])
-    cfg["tile_y"] = SplitEntity([1, M])
+    return ret

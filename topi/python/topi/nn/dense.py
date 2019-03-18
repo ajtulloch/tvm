@@ -60,3 +60,19 @@ def dense(data, weight, bias=None):
         2-D with shape [batch, out_dim]
     """
     return dense_default(data, weight, bias)
+
+@tvm.target.generic_func
+def dense_alter_layout(attrs, inputs, tinfos):
+    """Change Dense layout.
+
+    Parameters
+    ----------
+    attrs : nnvm.top.AttrDict
+        Attributes of current convolution
+    inputs : nnvm.symbol
+        Grouped input symbols
+    tinfos : list
+        Input shape and dtype
+    """
+    # not to change by default
+    return None

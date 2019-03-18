@@ -4,7 +4,7 @@ from __future__ import absolute_import as _abs
 from .. import api as _api
 from .. import intrin as _intrin
 
-def matmul(lhs, rhs, transa=False, transb=False):
+def matmul(lhs, rhs, transa=False, transb=False, **kwargs):
     """Create an extern op that compute matrix mult of A and rhs with CrhsLAS
 
     This function serves as an example on how to call external libraries.
@@ -31,4 +31,4 @@ def matmul(lhs, rhs, transa=False, transb=False):
         (n, m), [lhs, rhs],
         lambda ins, outs: _intrin.call_packed(
             "tvm.contrib.cblas.matmul",
-            ins[0], ins[1], outs[0], transa, transb), name="C")
+            ins[0], ins[1], outs[0], transa, transb), name="C", **kwargs)

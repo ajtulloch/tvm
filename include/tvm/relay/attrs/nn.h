@@ -318,10 +318,19 @@ struct GlobalPool2DAttrs : public tvm::AttrsNode<GlobalPool2DAttrs> {
 /*! \brief Attributes for dense operator */
 struct DenseAttrs : public tvm::AttrsNode<DenseAttrs> {
   IndexExpr units;
+  std::string data_layout;
+  std::string kernel_layout;
+  std::string out_layout;
 
   TVM_DECLARE_ATTRS(DenseAttrs, "relay.attrs.DenseAttrs") {
     TVM_ATTR_FIELD(units)
         .describe("Number of hidden units of the dense transformation.");
+    TVM_ATTR_FIELD(data_layout).set_default("NI")
+      .describe("Layout of input in Dense op.");
+    TVM_ATTR_FIELD(kernel_layout).set_default("OI")
+      .describe("Layout of kernel in Dense op.");
+    TVM_ATTR_FIELD(out_layout).set_default("")
+      .describe("Layout of output in Dense op.");
   }
 };
 

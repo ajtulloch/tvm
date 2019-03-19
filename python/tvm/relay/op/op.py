@@ -201,6 +201,11 @@ def schedule_injective(attrs, outputs, target):
     with target:
         return topi.generic.schedule_injective(outputs)
 
+def schedule_concatenate(attrs, outputs, target):
+    """Generic schedule for binary broadcast."""
+    with target:
+        return topi.generic.schedule_concatenate(outputs)
+
 __DEBUG_COUNTER__ = 0
 
 def debug(expr, debug_func=None):

@@ -45,9 +45,9 @@ def gru(X, H, W_X, W_H, B, **kwargs):
     HT = relay.nn.dense(H, W_H)
     XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
     HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
-    u_t = XT_gates[0] + HT_gates[0]
-    r_t = XT_gates[1] + HT_gates[1]
-    e_t = r_t * HT_gates[2] + XT_gates[2]
+    u_t = relay.sigmoid(XT_gates[0] + HT_gates[0])
+    r_t = relay.sigmoid(XT_gates[1] + HT_gates[1])
+    e_t = relay.tanh(r_t * HT_gates[2] + XT_gates[2])
     return u_t * HT_gates[0] + (relay.expr.const(1.0, dtype=dtype) - u_t) * e_t
 
 gru_0_W_X = relay.var("gru_0_W_X", shape=(3 * rnn_dims, rnn_dims), dtype=dtype)
@@ -90,7 +90,7 @@ fc_3_o = dense(relu2_o, fc_3_W, fc_3_B)
 
 softmax_o = relay.nn.softmax(fc_3_o, axis=-1)
 
-outputs = relay.expr.Tuple([softmax_o])
+outputs = relay.expr.Tuple([fc_3_o])
 
 func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
 relay.ir_pass.infer_type(func)
@@ -117,7 +117,7 @@ skl_target = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-g
 
 def tune():
     global func
-    with relay.build_config(opt_level=3):
+    with relay.build_config(opt_level=2):
         func = relay.optimize(func, target=skl_target, params=params)
         print(func.astext(show_meta_data=False))
         tasks = autotvm.task.extract_from_program(
@@ -152,7 +152,11 @@ def tune():
 
 if 0:
     tune()
-with autotvm.apply_history_best("synthesis_autotvm_skl.log"):
+    import sys
+    sys.exit()
+
+
+with autotvm.apply_history_best("synthesis_autotvm_skl.best.log"):
     with relay.build_config(opt_level=3):
         func = relay.optimize(func, target=skl_target, params=params)
         print(func.astext(show_meta_data=False))
@@ -198,4 +202,3 @@ module.run()
 module.run()
 module.run()
 module.run()
-

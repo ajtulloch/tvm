@@ -40,7 +40,8 @@ def dense_default(data, weight, bias=None):
 
 
 @tvm.target.override_native_generic_func("dense")
-def dense(data, weight, bias=None):
+def dense(data, weight, bias=None,
+          data_layout="NI", kernel_layout="OI", out_layout=""):
     """Applies a linear transformation: :math:`Y = XW^T + b`.
 
     Parameters
@@ -62,7 +63,7 @@ def dense(data, weight, bias=None):
     return dense_default(data, weight, bias)
 
 @tvm.target.generic_func
-def dense_alter_layout(attrs, inputs, tinfos):
+def dense_alter_layout(attrs, inputs, tinfos, F):
     """Change Dense layout.
 
     Parameters
@@ -74,6 +75,4 @@ def dense_alter_layout(attrs, inputs, tinfos):
     tinfos : list
         Input shape and dtype
     """
-    import ipdb; ipdb.set_trace()
-    # not to change by default
     return None

@@ -91,24 +91,45 @@ bool DenseRel(const Array<Type>& types,
 
   const DenseAttrs* param = attrs.as<DenseAttrs>();
   CHECK(param != nullptr);
+  const Layout in_layout(param->data_layout);
+  const Layout kernel_layout(param->kernel_layout);
 
-  CHECK(static_cast<int>(data->shape.size()) != 0);
+  static const Layout kNI("NI");
+  static const Layout kOI("OI");
 
-  Array<tvm::Expr> oshape = data->shape;
+  const auto trans_in_layout = BijectiveLayoutNode::make(in_layout, kNI);
+  CHECK(trans_in_layout.defined())
+    << "Conv only support input layouts that are convertible from NI."
+    << " But got " << in_layout;
+
+  const auto trans_kernel_layout = BijectiveLayoutNode::make(param->kernel_layout, kOI);
+  CHECK(trans_kernel_layout.defined())
+      << "Dense only support kernel layouts that are convertible from OI."
+      << " But got " << kernel_layout;
+
+  Layout out_layout(param->out_layout == "" ? param->data_layout : param->out_layout);
+  const auto trans_out_layout = BijectiveLayoutNode::make(out_layout, kNI);
+  CHECK(trans_out_layout.defined())
+      << "Conv only support output layouts that are convertible from NI."
+      << " But got " << out_layout;
+
+  Array<IndexExpr> dshape_ni = trans_in_layout.ForwardShape(data->shape);
+  Array<IndexExpr> wshape_oi;
   if (param->units.defined()) {
-    Array<tvm::Expr> dshape = data->shape;
     // validate the weight shape is proper if defined
     // Assign weight type
-    Array<IndexExpr> wshape({param->units, dshape[dshape.size() - 1]});
+    wshape_oi = Array<IndexExpr>({param->units, dshape_ni[1]});
+    auto wshape = trans_kernel_layout.BackwardShape(wshape_oi);
     reporter->Assign(types[1], TensorTypeNode::make(wshape, data->dtype));
-    oshape.Set((oshape.size() - 1), param->units);
   } else {
     if (weight == nullptr) return false;
-    Array<tvm::Expr> wshape = weight->shape;
-    oshape.Set((oshape.size() - 1), wshape[0]);
+    wshape_oi = trans_kernel_layout.ForwardShape(weight->shape);
   }
 
+  Array<IndexExpr> oshape_ni({dshape_ni[0], wshape_oi[0]});
+  auto oshape = trans_out_layout.BackwardShape(oshape_ni);
   // assign output type
+
   reporter->Assign(types[2], TensorTypeNode::make(oshape, data->dtype));
   return true;
 }
@@ -117,9 +138,15 @@ bool DenseRel(const Array<Type>& types,
 // Positional relay function to create dense operator used by frontend FFI.
 Expr MakeDense(Expr data,
                Expr weight,
-               IndexExpr units) {
+               IndexExpr units,
+               std::string data_layout,
+               std::string kernel_layout,
+               std::string out_layout) {
   auto attrs = make_node<DenseAttrs>();
   attrs->units = units;
+  attrs->data_layout = std::move(data_layout);
+  attrs->kernel_layout = std::move(kernel_layout);
+  attrs->out_layout = std::move(out_layout);
   static const Op& op = Op::Get("nn.dense");
   return CallNode::make(op, {data, weight}, Attrs(attrs), {});
 }
@@ -127,9 +154,20 @@ Expr MakeDense(Expr data,
 
 TVM_REGISTER_API("relay.op.nn._make.dense")
 .set_body([](const TVMArgs& args, TVMRetValue* rv) {
-    runtime::detail::unpack_call<Expr, 3>(MakeDense, args, rv);
+    runtime::detail::unpack_call<Expr, 6>(MakeDense, args, rv);
   });
 
+Array<Array<Layout>> DenseInferCorrectLayout(const Attrs& attrs,
+                                             const Array<Layout>& new_in_layouts,
+                                             const Array<Layout>& old_in_layouts,
+                                             const Array<Array<IndexExpr>>& old_in_shapes) {
+  const DenseAttrs* params = attrs.as<DenseAttrs>();
+  // We always make other operators to fit the layouts of dense layers
+  // So this inference ignores all inputs
+  return Array<Array<Layout>>{
+      {params->data_layout, params->kernel_layout},
+      {params->out_layout == "" ? params->data_layout : params->out_layout}};
+}
 
 RELAY_REGISTER_OP("nn.dense")
 .describe(R"code(Applies a linear transformation: :math:`Y = XW^T`.
@@ -144,7 +182,9 @@ RELAY_REGISTER_OP("nn.dense")
 .add_argument("data", "nD Tensor", "Input data.")
 .add_argument("weight", "2D Tensor", "Weight matrix.")
 .set_support_level(1)
+.set_attr<FInferCorrectLayout>("FInferCorrectLayout", DenseInferCorrectLayout)
 .add_type_rel("Dense", DenseRel);
+
 
 // relay.leaky_relu
 TVM_REGISTER_NODE_TYPE(LeakyReluAttrs);

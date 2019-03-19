@@ -459,7 +459,10 @@ def bias_add(data, bias, axis=1):
     return _make.bias_add(data, bias, axis)
 
 
-def dense(data, weight, units=None):
+def dense(data, weight, units=None,
+          data_layout="NI",
+          kernel_layout="OI",
+          out_layout=""):
     """Dense operator.
     Applies a linear transformation
 
@@ -483,7 +486,7 @@ def dense(data, weight, units=None):
     result : tvm.relay.Expr
         The computed result.
     """
-    return _make.dense(data, weight, units)
+    return _make.dense(data, weight, units, data_layout, kernel_layout, out_layout)
 
 
 def relu(data):

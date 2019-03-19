@@ -319,6 +319,9 @@ class ApplyHistoryBest(DispatchContext):
         # then try matching by target key
         for k in target.keys:
             key = (k, workload)
+            print("Key: ", key)
+            for key in self.best_by_targetkey.keys():
+                print("Candidate:, ", key)
             if key in self._best_user_defined:
                 return self._best_user_defined[key]
             if key in self.best_by_targetkey:

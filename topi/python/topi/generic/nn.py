@@ -223,6 +223,10 @@ def schedule_depthwise_conv2d_NCHWc(outs):
     """
     return _default_schedule(outs, False)
 
+@tvm.target.generic_func
+def schedule_sparse_dense(outs):
+    return _default_schedule(outs, False)
+
 
 @tvm.target.generic_func
 def schedule_group_conv2d_nchw(outs):

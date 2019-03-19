@@ -795,6 +795,9 @@ def batch_matmul(x, y):
     """
     return _make.batch_matmul(x, y)
 
+def sparse_dense(data, weight):
+    return _make.sparse_dense(data, weight.data, weight.indices, weight.indptr)
+
 
 def contrib_conv2d_winograd_without_weight_transform(data,
                                                      weight,

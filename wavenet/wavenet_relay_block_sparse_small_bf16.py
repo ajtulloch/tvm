@@ -123,13 +123,18 @@ def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
     assert s.indptr.shape == (M // BS_R + 1, )
     return s
 
+def to_bf16(x):
+    assert x.dtype == np.float32
+    return (x.view('<i4') + 2 ** 15 >> 16).astype("int16")
+
+
 def instantiate(param):
     if isinstance(param, BSR):
         import scipy.sparse as sp
         param_np = random_bsr_matrix(M=param.N, N=param.K, BS_R=param.BS_R, BS_C=param.BS_C, density=param.density, dtype='float32')
         print(param_np.data.shape)
         return [
-            (param.data.name_hint, tvm.ndarray.array(param_np.data)),
+            (param.data.name_hint, tvm.ndarray.array(to_bf16(param_np.data))),
             (param.indices.name_hint, tvm.ndarray.array(param_np.indices.astype("int32"))),
             (param.indptr.name_hint, tvm.ndarray.array(param_np.indptr.astype("int32"))),
         ]

@@ -34,6 +34,8 @@ def sparse_dense_csrmv(data, weight_data, weight_indices, weight_indptr):
     return tvm.compute(
         oshape, f, name="sparse_dense", tag="sparse_dense_csrmv")
 
+def tvm_from_bf16(x):
+    return tvm.call_pure_intrin("float32", "reinterpret", x.astype("int32") << 16)
 
 def sparse_dense_bsrmv(data, weight_data, weight_indices, weight_indptr):
     import topi
@@ -54,6 +56,9 @@ def sparse_dense_bsrmv(data, weight_data, weight_indices, weight_indptr):
         c = tvm.reduce_axis((0, BS_C), name="c")
         j = weight_indices[jj]
         block_ij_val = weight_data[jj][r][c]
+        if weight_data.dtype == "int16":
+            block_ij_val = tvm_from_bf16(block_ij_val)
+
         x_val = data[0, BS_C * j + c]
         return tvm.sum(block_ij_val * x_val, axis=[elem_idx, c])
 

@@ -41,7 +41,7 @@ BSR = collections.namedtuple('CSR', ['data', 'indices', 'indptr', 'N', 'K', 'BS_
 def sparse_dense(X, W, B, **kwargs):
     return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
 
-def to_sparse(v, density=0.03, BS_R=16, BS_C=1):
+def to_sparse(v, density=0.04, BS_R=16, BS_C=1):
     name = v.name_hint
     (N, K) = v.type_annotation.concrete_shape
     nnz = int(density * N * K)
@@ -175,7 +175,7 @@ def instantiate(param):
             )
         ]
 params = collections.OrderedDict([(k, v) for param in param_vars for (k, v) in instantiate(param)])
-
+print("Total param size: ", sum(v.asnumpy().nbytes for v in params.values()))
 input_vars = [x, h1, h2, m_t, a1_t, a2_t, a3_t, a4_t]
 inputs = collections.OrderedDict(
     [(

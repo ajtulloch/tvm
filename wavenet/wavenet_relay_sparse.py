@@ -14,8 +14,8 @@ import tempfile
 
 dtype = "float32"
 
-rnn_dims = 128
-fc_dims = 128
+rnn_dims = 512
+fc_dims = 512
 
 feat_dims = 24
 aux_dims = 32
@@ -39,7 +39,7 @@ CSR = collections.namedtuple('CSR', ['data', 'indices', 'indptr', 'N', 'K', 'den
 def sparse_dense(X, W, B, **kwargs):
     return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
 
-def to_sparse(v, density=0.04):
+def to_sparse(v, density=0.03):
     name = v.name_hint
     (N, K) = v.type_annotation.concrete_shape
     nnz = int(density * N * K)
@@ -54,7 +54,7 @@ i_o = sparse_dense(concat0_o, fc_0_W, fc_0_B)
 
 def approx_sigmoid(v):
     x = relay.abs(v)
-    x2 = x * x
+    x2 = v * v
     e = C(1.0) + x + x2 * C(0.555)
     e_pos = e / (C(1) + e)
     e_neg = C(1) / (C(1) + e)
@@ -64,7 +64,7 @@ def approx_sigmoid(v):
 
 def approx_tanh(v):
     x = relay.abs(v)
-    x2 = x * x
+    x2 = v * v
     e = C(1.0) + x + x2 * C(0.555)
     return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
 
@@ -198,7 +198,8 @@ def tune():
                 callbacks=[
                     autotvm.callback.progress_bar(n_trial, prefix=prefix),
                     autotvm.callback.log_to_file(log_filename)
-                ])
+                ]
+            )
 
 if 0:
     tune()

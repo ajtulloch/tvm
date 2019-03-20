@@ -47,7 +47,8 @@ def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", ou
         _, out_dim = get_const_tuple(weight.shape)
 
 
-    cfg.define_knob('pretranspose', [1])
+    cfg.define_knob('pretranspose', [0, 1])
+    cfg.define_knob('blas', [0, 1])
     if kernel_layout == "OI" and cfg['pretranspose'].val:
         import topi
         weight = topi.transpose(weight, [1, 0])
@@ -57,15 +58,19 @@ def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", ou
 
     k = tvm.reduce_axis((0, in_dim), name='k')
     cfg.define_split("tile_y", cfg.axis(out_dim), num_outputs=2, filter=lambda x: x.size[-1] % 16 == 0)
-    matmul = tvm.compute(
-        (batch, out_dim),
-        lambda i, j: tvm.sum(
-            data[i, k] * (
-                weight[k, j] if kernel_layout == "IO" else weight[j, k]),
-            axis=k),
-        tag='dense',
-        name="matmul",
-    )
+    if cfg['blas'].val == 0:
+        matmul = tvm.compute(
+            (batch, out_dim),
+            lambda i, j: tvm.sum(
+                data[i, k] * (
+                    weight[k, j] if kernel_layout == "IO" else weight[j, k]),
+                axis=k),
+            tag='dense',
+            name="matmul",
+        )
+    else:
+        transb = False if kernel_layout=="IO" else True
+        matmul = cblas.matmul(data, weight, transb=transb, tag="dense_blas")
 
     if bias is not None:
         matmul = tvm.compute(
@@ -74,6 +79,7 @@ def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", ou
             name="bias_add",
             tag=tag.BROADCAST
         )
+    cfg.add_flop(2 * batch * in_dim * out_dim)
     return matmul
 
 
@@ -101,6 +107,19 @@ def schedule_dense_tvm(s, cfg, op, out):
         s[out].vectorize(yi)
         s[C].compute_at(s[out], yo)
 
+def schedule_dense_blas(s, cfg, op, out):
+    C = op.output(0)
+    A, B = op.input_tensors
+    if isinstance(B.op, tvm.tensor.ComputeOp) and autotvm.GLOBAL_SCOPE.in_tuning:
+        assert cfg['pretranspose'].val == 1
+        s[B].pragma(s[B].op.axis[0], "debug_skip_region")
+
+    if op != out:
+        (x, y) = s[out].op.axis
+        yo, yi = cfg["tile_y"].apply(s, out, y)
+        s[out].vectorize(yi)
+
+
 
 @autotvm.register_topi_schedule(generic.schedule_dense, 'cpu', ['direct'])
 def schedule_dense(cfg, outs):
@@ -125,6 +144,8 @@ def schedule_dense(cfg, outs):
     def _callback(op):
         if op.tag == 'dense':
             schedule_dense_tvm(s, cfg, op, outs[0].op)
+        if op.tag == 'dense_blas':
+            schedule_dense_blas(s, cfg, op, outs[0].op)
     traverse_inline(s, outs[0].op, _callback)
     return s
 

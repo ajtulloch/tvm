@@ -21,14 +21,30 @@ bool SparseDenseRel(const Array<Type>& types, int num_inputs, const Attrs& attrs
                     const TypeReporter& reporter) {
   CHECK_EQ(types.size(), 5);
   const auto* data = types[0].as<TensorTypeNode>();
-  // const auto* weight_data = types[1].as<TensorTypeNode>();
+  const auto* weight_data = types[1].as<TensorTypeNode>();
+  CHECK(weight_data->shape.size() == 1 || weight_data->shape.size() == 3);
+
   // const auto* weight_indices = types[2].as<TensorTypeNode>();
   const auto* weight_indptr = types[3].as<TensorTypeNode>();
   if (data == nullptr) return false;
 
-  Array<IndexExpr> oshape({data->shape[0], weight_indptr->shape[0] - 1});
-  reporter->Assign(types[4], TensorTypeNode::make(oshape, data->dtype));
-  return true;
+  if (weight_data->shape.size() == 1) {
+    // CSR case.
+    Array<IndexExpr> oshape({data->shape[0], weight_indptr->shape[0] - 1});
+    reporter->Assign(types[4], TensorTypeNode::make(oshape, data->dtype));
+    return true;
+  }
+
+  if (weight_data->shape.size() == 3) {
+    // BSR case.
+    Array<IndexExpr> oshape({
+        data->shape[0],
+          (weight_indptr->shape[0] - 1) * weight_data->shape[1]});
+    reporter->Assign(types[4], TensorTypeNode::make(oshape, data->dtype));
+    return true;
+  }
+  LOG(FATAL) << "unreachable";
+  return false;
 }
 
 // Positional relay function to create dense operator used by frontend FFI.

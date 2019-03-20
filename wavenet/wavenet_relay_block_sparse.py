@@ -41,8 +41,7 @@ BSR = collections.namedtuple('CSR', ['data', 'indices', 'indptr', 'N', 'K', 'BS_
 def sparse_dense(X, W, B, **kwargs):
     return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
 
-
-def to_sparse(v, density=0.04, BS_R=16, BS_C=1):
+def to_sparse(v, density=0.03, BS_R=16, BS_C=1):
     name = v.name_hint
     (N, K) = v.type_annotation.concrete_shape
     nnz = int(density * N * K)
@@ -59,17 +58,16 @@ i_o = sparse_dense(concat0_o, fc_0_W, fc_0_B)
 def approx_sigmoid(v):
     x = relay.abs(v)
     x2 = v * v
-    e = C(1.0) + x + x2 * C(0.555)
+    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
     e_pos = e / (C(1) + e)
     e_neg = C(1) / (C(1) + e)
-    return e_pos
     # TODO: ensure this returns good code.
-    # return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+    return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
 
 def approx_tanh(v):
     x = relay.abs(v)
     x2 = v * v
-    e = C(1.0) + x + x2 * C(0.555)
+    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
     return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
 
 def C(x):

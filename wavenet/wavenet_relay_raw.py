@@ -43,17 +43,16 @@ i_o = dense(concat0_o, fc_0_W, fc_0_B)
 def approx_sigmoid(v):
     x = relay.abs(v)
     x2 = v * v
-    e = C(1.0) + x + x2 * C(0.555)
+    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
     e_pos = e / (C(1) + e)
     e_neg = C(1) / (C(1) + e)
-    return e_pos
     # TODO: ensure this returns good code.
-    # return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+    return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
 
 def approx_tanh(v):
     x = relay.abs(v)
     x2 = v * v
-    e = C(1.0) + x + x2 * C(0.555)
+    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
     return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
 
 def C(x):

@@ -608,8 +608,8 @@ llvm::Value* CodeGenLLVM::CreateCallExtern(const Call* op) {
 llvm::Value* CodeGenLLVM::CreateIntrinsic(const Call* op) {
   if (op->is_intrinsic("llvm_intrin")) {
     CHECK_GE(op->args.size(), 2U);
-    llvm::Intrinsic::ID id = static_cast<llvm::Intrinsic::ID>(
-        op->args[0].as<UIntImm>()->value);
+    llvm::Intrinsic::ID id =
+        static_cast<llvm::Intrinsic::ID>(CHECK_NOTNULL(op->args[0].as<UIntImm>())->value);
     uint64_t num_signature = op->args[1].as<UIntImm>()->value;
     std::vector<llvm::Value*> arg_value;
     std::vector<llvm::Type*> sig_type;

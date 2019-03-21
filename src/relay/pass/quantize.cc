@@ -445,6 +445,8 @@ RELAY_REGISTER_OP("nn.relu")
 RELAY_REGISTER_OP("strided_slice")
 .set_attr<FForwardRewrite>("FQRealizeRewrite", IdentityRealize);
 
+RELAY_REGISTER_OP("nn.upsampling").set_attr<FForwardRewrite>("FQRealizeRewrite", IdentityRealize);
+RELAY_REGISTER_OP("nn.sigmoid").set_attr<FForwardRewrite>("FQRealizeRewrite", IdentityRealize);
 
 Expr MaxPoolRealize(const Call& ref_call,
                     const Array<Expr>& new_args,
@@ -462,7 +464,6 @@ Expr MaxPoolRealize(const Call& ref_call,
 
 RELAY_REGISTER_OP("nn.max_pool2d")
 .set_attr<FForwardRewrite>("FQRealizeRewrite", MaxPoolRealize);
-
 
 Expr AvgPoolRealize(const Call& ref_call,
                     const Array<Expr>& new_args,

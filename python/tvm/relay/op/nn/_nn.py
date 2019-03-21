@@ -131,6 +131,10 @@ def alter_op_layout_conv2d(attrs, inputs, tinfos):
 
 reg.register_pattern("nn.conv2d", OpPattern.OUT_ELEMWISE_FUSABLE)
 
+@reg.register_alter_op_layout("dense")
+def alter_conv2d_layout(attrs, inputs, tinfos):
+    return topi.nn.dense_alter_layout(attrs, inputs, tinfos)
+
 
 # conv2d_transpose
 @reg.register_compute("nn.conv2d_transpose")
@@ -188,8 +192,13 @@ def schedule_max_pool2d(attrs, outs, target):
     with target:
         return topi.generic.schedule_pool(outs, layout)
 
-reg.register_pattern("nn.max_pool2d", OpPattern.OUT_ELEMWISE_FUSABLE)
+@reg.register_alter_op_layout("nn.max_pool2d")
+def alter_op_layout_max_pool2d(attrs, inputs, tinfos):
+    """Alternate the layout of conv2d"""
+    from ... import op
+    return topi.nn.max_pool2d_alter_layout(attrs, inputs, tinfos, op)
 
+reg.register_pattern("nn.max_pool2d", OpPattern.OUT_ELEMWISE_FUSABLE)
 
 # avg_pool2d
 @reg.register_schedule("nn.avg_pool2d")
@@ -266,11 +275,20 @@ def schedule_l2_normalize(attrs, outs, target):
 reg.register_pattern("nn.l2_normalize", OpPattern.OUT_ELEMWISE_FUSABLE)
 
 # upsampling
-reg.register_schedule("nn.upsampling", reg.schedule_injective)
 def schedule_upsampling(_, outs, target):
     """Schedule definition of upsampling"""
     with target:
         return topi.generic.schedule_injective(outs)
+
+@reg.register_alter_op_layout("nn.upsampling")
+def alter_op_layout_upsampling(attrs, inputs, tinfos):
+    """Alternate the layout of upsampling"""
+    from ... import op
+    return topi.nn.upsampling_alter_layout(attrs, inputs, tinfos, op)
+
+reg.register_schedule("nn.upsampling", reg.schedule_injective)
+
+
 # pad
 reg.register_schedule("nn.pad", schedule_broadcast)
 

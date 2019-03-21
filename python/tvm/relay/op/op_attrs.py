@@ -21,3 +21,11 @@ class Conv2DWinogradWeightTransformAttrs(Attrs):
 @register_relay_attr_node
 class GlobalPool2DAttrs(Attrs):
     """Attribute of nn.global_pool"""
+
+@register_relay_attr_node
+class MaxPool2DAttrs(Attrs):
+    """Attribute of nn.max_pool2d"""
+
+@register_relay_attr_node
+class UpSamplingAttrs(Attrs):
+    """Attribute of nn.upsampling"""

@@ -222,7 +222,6 @@ register_annotate_function("nn.relu", identity_rewrite)
 register_annotate_function("strided_slice", identity_rewrite)
 register_annotate_function("nn.avg_pool2d", identity_rewrite)
 
-
 def pool2d_rewrite(ref_call, new_args, ctx):
     """Rewrite function for max pool2d"""
     if _conv_counter() <= current_qconfig().skip_k_conv:
@@ -233,12 +232,14 @@ def pool2d_rewrite(ref_call, new_args, ctx):
         return None
     if x_kind == QAnnotateKind.ACTIVATION:
         expr = attach_simulated_quantize(expr, QAnnotateKind.INPUT)
+    print(expr)
     expr = _forward_op(ref_call, [expr])
     return QAnnotateExpr(expr, QAnnotateKind.INPUT)
 
 
 register_annotate_function("nn.max_pool2d", pool2d_rewrite)
 
+register_annotate_function("nn.upsampling", pool2d_rewrite)
 
 @register_annotate_function("concatenate")
 def concatenate_rewrite(ref_call, new_args, ctx):

@@ -219,27 +219,37 @@ def test_sparse_dense_csr():
     func(tvm.ndarray.array(X_np), tvm.ndarray.array(W_sp_np.data), tvm.ndarray.array(W_sp_np.indices), tvm.ndarray.array(W_sp_np.indptr), Y_tvm)
     tvm.testing.assert_allclose(Y_tvm.asnumpy(), Y_np, atol=1e-4, rtol=1e-4)
 
-def test_sparse_dense_bsr():
-    def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
-        import itertools
-        Y = np.zeros((M, N), dtype=dtype)
-        assert M % BS_R == 0
-        assert N % BS_C == 0
-        nnz = int(density * M * N)
-        num_blocks = int(nnz / (BS_R * BS_C)) + 1
-        candidate_blocks = np.asarray(list(itertools.product(range(0, M, BS_R), range(0, N, BS_C))))
-        assert candidate_blocks.shape[0] == M // BS_R * N // BS_C
-        chosen_blocks = candidate_blocks[np.random.choice(candidate_blocks.shape[0], size=num_blocks, replace=False)]
-        for i in range(len(chosen_blocks)):
-            r, c = chosen_blocks[i]
-            Y[r:r + BS_R, c:c + BS_C] = np.random.randn(BS_R, BS_C)
-        s = sp.bsr_matrix(Y, blocksize=(BS_R, BS_C))
-        assert s.data.shape == (num_blocks, BS_R, BS_C)
-        assert s.indices.shape == (num_blocks, )
-        assert s.indptr.shape == (M // BS_R + 1, )
-        return s
 
+def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
     import scipy.sparse as sp
+    import itertools
+    Y = np.zeros((M, N), dtype=dtype)
+    assert M % BS_R == 0
+    assert N % BS_C == 0
+    nnz = int(density * M * N)
+    num_blocks = int(nnz / (BS_R * BS_C)) + 1
+    candidate_blocks = np.asarray(list(itertools.product(range(0, M, BS_R), range(0, N, BS_C))))
+    assert candidate_blocks.shape[0] == M // BS_R * N // BS_C
+    chosen_blocks = candidate_blocks[np.random.choice(candidate_blocks.shape[0], size=num_blocks, replace=False)]
+    for i in range(len(chosen_blocks)):
+        r, c = chosen_blocks[i]
+        Y[r:r + BS_R, c:c + BS_C] = np.random.randn(BS_R, BS_C)
+    s = sp.bsr_matrix(Y, blocksize=(BS_R, BS_C))
+    assert s.data.shape == (num_blocks, BS_R, BS_C)
+    assert s.indices.shape == (num_blocks, )
+    assert s.indptr.shape == (M // BS_R + 1, )
+    return s
+
+def to_bf16(x):
+    assert x.dtype == np.float32
+    return ((x.view('<u4') + 2 ** 15) >> 16).astype("uint16")
+
+def from_bf16(x):
+    assert x.dtype == np.uint16
+    return (x.astype("uint32") << 16).view('<f4')
+
+
+def test_sparse_dense_bsr():
     M, N, K, BS_R, BS_C, density = 1, 64, 128, 8, 16, 0.2
     X_np = np.random.randn(M, K).astype("float32")
     W_sp_np = random_bsr_matrix(N, K, BS_R, BS_C, density=density, dtype="float32")
@@ -257,10 +267,57 @@ def test_sparse_dense_bsr():
     func(tvm.ndarray.array(X_np), tvm.ndarray.array(W_sp_np.data), tvm.ndarray.array(W_sp_np.indices), tvm.ndarray.array(W_sp_np.indptr), Y_tvm)
     tvm.testing.assert_allclose(Y_tvm.asnumpy(), Y_np, atol=1e-4, rtol=1e-4)
 
+def test_bf16():
+    np.random.seed(42)
+
+    x = np.zeros((10,)).astype(np.float32)
+    x_rt = from_bf16(to_bf16(x))
+    np.testing.assert_equal(x, x_rt)
+
+    x = np.random.randn(50000).astype(np.float32)
+    x_rt = from_bf16(to_bf16(x))
+    abs_x = np.max(np.abs(x - x_rt))
+    rel_x = np.max(np.abs((x - x_rt) / x))
+    print(abs_x, rel_x, x[np.argmax(np.abs(x - x_rt))], x_rt[np.argmax(np.abs(x - x_rt))])
+    np.testing.assert_allclose(x, x_rt, rtol=1e-2, atol=1e-2)
+
+def test_sparse_dense_bsr_bf16():
+    M, N, K, BS_R, BS_C, density = 1, 64, 128, 2, 2, 0.2
+    X_np = np.random.randn(M, K).astype("float32")
+    W_sp_np = random_bsr_matrix(N, K, BS_R, BS_C, density=density, dtype="float32")
+    W_np = W_sp_np.todense()
+    W_sp_bf16 = to_bf16(W_sp_np.data)
+    W_sp_np.data = from_bf16(to_bf16(W_sp_np.data))
+
+    Y_np = X_np.dot(W_np.T)
+    Y_np_bf16 = X_np.dot(W_sp_np.todense().T)
+
+    def at_argmax(x, cond):
+        return x[np.unravel_index(np.argmax(cond, axis=None), x.shape)]
+
+    tvm.testing.assert_allclose(from_bf16(to_bf16(W_sp_np.data)), W_sp_np.data, atol=1e-2, rtol=1e-2)
+    print(at_argmax(Y_np, np.abs(Y_np - Y_np_bf16)), at_argmax(Y_np_bf16, np.abs(Y_np - Y_np_bf16)))
+    print(at_argmax(Y_np, np.abs((Y_np - Y_np_bf16) / Y_np)), at_argmax(Y_np_bf16, np.abs((Y_np - Y_np_bf16) / Y_np)))
+    tvm.testing.assert_allclose(Y_np_bf16, Y_np, atol=1e-1, rtol=1e-2)
+
+    W_data = tvm.placeholder(shape=W_sp_bf16.shape, dtype=str(W_sp_bf16.dtype))
+    W_indices = tvm.placeholder(shape=W_sp_np.indices.shape, dtype=str(W_sp_np.indices.dtype))
+    W_indptr = tvm.placeholder(shape=W_sp_np.indptr.shape, dtype=str(W_sp_np.indptr.dtype))
+    X = tvm.placeholder(shape=X_np.shape, dtype=str(X_np.dtype))
+    Y = topi.nn.sparse_dense(X, W_data, W_indices, W_indptr)
+    s = tvm.create_schedule(Y.op)
+    func = tvm.build(s, [X, W_data, W_indices, W_indptr, Y])
+    Y_tvm = tvm.ndarray.array(np.zeros(Y_np.shape, dtype=Y_np.dtype))
+    func(tvm.ndarray.array(X_np), tvm.ndarray.array(W_sp_bf16), tvm.ndarray.array(W_sp_np.indices), tvm.ndarray.array(W_sp_np.indptr), Y_tvm)
+
+    tvm.testing.assert_allclose(Y_tvm.asnumpy(), Y_np_bf16, atol=1e-2, rtol=1e-2)
+
 
 def test_sparse_dense():
     test_sparse_dense_csr()
     test_sparse_dense_bsr()
+    test_sparse_dense_bsr_bf16()
+    test_bf16()
 
 if __name__ == "__main__":
     test_csrmv()

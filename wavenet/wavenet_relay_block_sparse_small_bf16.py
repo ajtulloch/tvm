@@ -125,7 +125,7 @@ def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
 
 def to_bf16(x):
     assert x.dtype == np.float32
-    return (x.view('<i4') + 2 ** 15 >> 16).astype("int16")
+    return ((x.view('<u4') + 2 ** 15) >> 16).astype("uint16")
 
 
 def instantiate(param):

@@ -13,6 +13,11 @@ import numpy as np
 from tvm.contrib import cblas
 from .check_targets import fp32_vector_width
 
+
+def tvm_from_bf16(x):
+    return tvm.call_pure_intrin("float32", "reinterpret", x.astype("uint32") << 16)
+
+
 @autotvm.register_topi_compute(nn.dense, 'cpu', ['direct'])
 def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", out_layout=""):
     """The default implementation of dense in topi.
@@ -58,13 +63,17 @@ def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", ou
 
     k = tvm.reduce_axis((0, in_dim), name='k')
     cfg.define_split("tile_y", cfg.axis(out_dim), num_outputs=2, filter=lambda x: x.size[-1] % 16 == 0)
-    if cfg['blas'].val == 0:
+    if cfg['blas'].val == 0 or weight.dtype != "float32":
+        def weight_lookup(j, k):
+            val = weight[k, j] if kernel_layout == "IO" else weight[j, k]
+            if val.dtype == "uint16":
+                return tvm_from_bf16(val)
+            else:
+                return val
+
         matmul = tvm.compute(
             (batch, out_dim),
-            lambda i, j: tvm.sum(
-                data[i, k] * (
-                    weight[k, j] if kernel_layout == "IO" else weight[j, k]),
-                axis=k),
+            lambda i, j: tvm.sum(data[i, k] * weight_lookup(j, k), axis=k),
             tag='dense',
             name="matmul",
         )

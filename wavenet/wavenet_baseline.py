@@ -31,22 +31,24 @@ class G(nn.Module):
         self.fc3 = nn.Linear(fc_dims, n_classes)
 
     def forward(self, x, h1, h2, m_t, a1_t, a2_t, a3_t, a4_t):
-        concat0_o = torch.cat([x, m_t, a1_t], dim=1)
-        i_o = self.I(concat0_o)
-        h1_prime = self.rnn1(i_o, h1)
-        gru2_add1_o = h1_prime + i_o
-        inp = torch.cat([gru2_add1_o, a2_t], dim=1)
-        h2_prime = self.rnn2(inp, h2)
-        add1_o = gru2_add1_o + h2_prime
-        concat1_o = torch.cat([add1_o, a3_t], dim=1)
-        relu1_o = nn.functional.relu(self.fc1(concat1_o))
-        concat2_o = torch.cat([relu1_o, a4_t], dim=1)
-        relu2_o = nn.functional.relu(self.fc2(concat2_o))
-        fc_3_o = self.fc3(relu2_o)
-        return (fc_3_o, h1_prime, h2_prime)
+        with torch.no_grad():
+            concat0_o = torch.cat([x, m_t, a1_t], dim=1)
+            i_o = self.I(concat0_o)
+            h1_prime = self.rnn1(i_o, h1)
+            gru2_add1_o = h1_prime + i_o
+            inp = torch.cat([gru2_add1_o, a2_t], dim=1)
+            h2_prime = self.rnn2(inp, h2)
+            add1_o = gru2_add1_o + h2_prime
+            concat1_o = torch.cat([add1_o, a3_t], dim=1)
+            relu1_o = nn.functional.relu(self.fc1(concat1_o))
+            concat2_o = torch.cat([relu1_o, a4_t], dim=1)
+            relu2_o = nn.functional.relu(self.fc2(concat2_o))
+            fc_3_o = self.fc3(relu2_o)
+            return (fc_3_o, h1_prime, h2_prime)
 
 traced_f = torch.jit.trace(G(), (x, h1, h2, m_t, a1_t, a2_t, a3_t, a4_t))
-print(traced_f.graph)
+traced_f(x, h1, h2, m_t, a1_t, a2_t, a3_t, a4_t)
+print(traced_f.graph_for(x, h1, h2, m_t, a1_t, a2_t, a3_t, a4_t))
 for i in range(5):
     import time
     t = time.perf_counter()

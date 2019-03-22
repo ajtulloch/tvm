@@ -57,7 +57,6 @@ def to_bf16(x):
 def instantiate(param):
     if isinstance(param, BSR):
         param_np = random_bsr_matrix(M=param.N, N=param.K, BS_R=param.BS_R, BS_C=param.BS_C, density=param.density)
-        print(param_np.data.shape)
         return [
             (param.data.name_hint, tvm.ndarray.array(to_bf16(param_np.data))),
             (param.indices.name_hint, tvm.ndarray.array(param_np.indices.astype("int32"))),
@@ -109,7 +108,7 @@ def tune(func, params, log_name):
                 early_stopping=early_stopping,
                 measure_option=measure_option,
                 callbacks=[
-                    autotvm.callback.progress_bar(n_trial, prefix=prefix),
+                    # autotvm.callback.progress_bar(n_trial, prefix=prefix),
                     autotvm.callback.log_to_file(log_name)
                 ]
             )
@@ -239,9 +238,10 @@ def run(rnn_dims, fc_dims, density, fc_density, fc_bf16):
     module = graph_runtime.create(graph, rlib, ctx)
     module.set_input(**r_new_params)
     module.set_input(**r_inputs)
-    ftimer = module.module.time_evaluator("run", ctx, 10000)
+    ftimer = module.module.time_evaluator("run", ctx, 1000)
+    ftimer()
     times = []
-    for i in range(5):
+    for i in range(4):
         prof_res = ftimer()
         logging.info("TVM time: %.1fus", prof_res.mean * 10 ** 6)
         times.append(prof_res.mean)
@@ -252,12 +252,17 @@ def run(rnn_dims, fc_dims, density, fc_density, fc_bf16):
 @click.pass_context
 def search(ctx):
     import tqdm
-    for (rnn_dims, fc_dims, density, fc_density, fc_bf16) in tqdm.tqdm(itertools.product(
+    for (fc_density,
+         rnn_dims,
+         fc_dims,
+         density,
+         fc_bf16
+    ) in tqdm.tqdm(itertools.product(
+            [0, 0.4, 0.3, 0.2, 0.1],
             [512, 768, 1024],
             [512, 768, 1024],
             [0.02, 0.03, 0.04, 0.05],
-            [0, 0.1, 0.2, 0.3, 0.4],
-            [0, 1])):
+            [1])):
         ctx.invoke(run, rnn_dims=rnn_dims, fc_dims=fc_dims, density=density, fc_density=fc_density, fc_bf16=fc_bf16)
 
 if __name__ == "__main__":

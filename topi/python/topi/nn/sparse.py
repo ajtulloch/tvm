@@ -70,3 +70,38 @@ def sparse_dense_bsrmv(data, weight_data, weight_indices, weight_indptr):
     return tvm.compute((M, NB * BS_R), lambda m, n: Y[m, n // BS_R, n % BS_R],
                        name="sparse_dense_bsrmv",
                        tag="sparse_dense_bsrmv")
+
+@tvm.target.generic_func
+def gru_gates(input_transform, hidden_transform):
+    import topi
+
+    def approx_sigmoid(v):
+        x = tvm.abs(v)
+        x2 = v * v
+        e = 1.0 + x + x2 * 0.5658 + 0.143 * x2 * x2
+        e_pos = e / (1.0 + e)
+        e_neg = 1 / (1.0 + e)
+
+        return tvm.if_then_else(v >= 0, e_pos, e_neg)
+
+    def approx_tanh(v):
+        x = tvm.abs(v)
+        x2 = v * v
+        e = 1.0 + x + x2 * 0.5658 + 0.143 * x2 * x2
+
+        def sign(x):
+            return tvm.if_then_else(v >= 0, 1, -1)
+
+        return sign(v) * (e - 1 / e) / (e + 1 / e)
+
+    dim3 = topi.util.get_const_int(input_transform.shape[1])
+    assert dim3 % 3 == 0
+    dim = dim3 // 3
+
+    def gru_gate(n, d):
+        u_t = approx_sigmoid(input_transform[n, d] + hidden_transform[n, d])
+        r_t = approx_sigmoid(input_transform[n, d + dim] + hidden_transform[n, d + dim])
+        e_t = approx_tanh(r_t * hidden_transform[n, d + 2 * dim] + input_transform[n, d + 2 * dim])
+        return u_t * hidden_transform[n, d] + (1.0 - u_t) * e_t
+
+    return tvm.compute((input_transform.shape[0], dim), gru_gate, name="gru_gates", tag=topi.tag.ELEMWISE)

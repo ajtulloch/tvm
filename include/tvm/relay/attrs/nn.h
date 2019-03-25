@@ -339,6 +339,10 @@ struct SparseDenseAttrs : public tvm::AttrsNode<SparseDenseAttrs> {
   TVM_DECLARE_ATTRS(SparseDenseAttrs, "relay.attrs.SparseDenseAttrs") {}
 };
 
+struct GRUGatesAttrs : public tvm::AttrsNode<GRUGatesAttrs> {
+  TVM_DECLARE_ATTRS(GRUGatesAttrs, "relay.attrs.GRUGatesAttrs") {}
+};
+
 /*! \brief Attributes for upsampling operator */
 struct UpSamplingAttrs : public tvm::AttrsNode<UpSamplingAttrs> {
   int scale;

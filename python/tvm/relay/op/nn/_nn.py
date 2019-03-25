@@ -86,6 +86,19 @@ def schedule_sparse_dense(attrs, outputs, target):
 
 reg.register_pattern("nn.sparse_dense", reg.OpPattern.OUT_ELEMWISE_FUSABLE)
 
+# sparse_dense
+@reg.register_compute("nn.gru_gates")
+def compute_gru_gates(attrs, inputs, out_type, target):
+    """Compute definition of gru_gates"""
+    return [topi.nn.gru_gates(inputs[0], inputs[1])]
+
+@reg.register_schedule("nn.gru_gates")
+def schedule_gru_gates(attrs, outputs, target):
+    with target:
+        return topi.generic.schedule_gru_gates(outputs)
+
+reg.register_pattern("nn.gru_gates", reg.OpPattern.ELEMWISE)
+
 
 # conv2d
 @reg.register_compute("nn.conv2d")

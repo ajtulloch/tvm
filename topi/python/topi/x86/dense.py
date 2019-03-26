@@ -165,6 +165,7 @@ def dense_alter_layout(attrs, inputs, tinfo, F):
     # query schedule and fallback if necessary
     workload = autotvm.task.args_to_workload(
         [tinfo[0], tinfo[1], None, attrs['data_layout'], attrs['kernel_layout'], attrs['out_layout']], nn.dense)
+    print(workload)
 
     cfg = dispatch_ctx.query(target, workload)
     if cfg.is_fallback:
@@ -178,7 +179,7 @@ def dense_alter_layout(attrs, inputs, tinfo, F):
 
     weights = tinfo[1]
     transposed_weights_placeholder = tvm.placeholder(
-        (weights.shape[0], weights.shape[1]), dtype=weights.dtype)
+        (weights.shape[1], weights.shape[0]), dtype=weights.dtype)
     transposed_workload = autotvm.task.args_to_workload(
         [tinfo[0], transposed_weights_placeholder, None, new_attrs['data_layout'], new_attrs['kernel_layout'], new_attrs['out_layout']], nn.dense)
     transposed_cfg = copy.deepcopy(cfg)

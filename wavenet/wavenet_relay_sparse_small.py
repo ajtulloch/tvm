@@ -18,30 +18,28 @@ dtype = "float32"
 
 rnn_dims = 1024
 fc_dims = 1024
-
+density = 0.03
 feat_dims = 24
 aux_dims = 32
 n_classes = 2 ** 8
-density = 0.03
 
 x = relay.var("x", shape=[1, rnn_dims], dtype=dtype)
 h1 = relay.var("h1", shape=[1, rnn_dims], dtype=dtype)
 
 import collections
-BSR = collections.namedtuple('CSR', ['data', 'indices', 'indptr', 'N', 'K', 'BS_R', 'BS_C', 'density'])
+CSR = collections.namedtuple('CSR', ['data', 'indices', 'indptr', 'N', 'K', 'density'])
 
 def sparse_dense(X, W, B, **kwargs):
     return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
 
-def to_sparse(v, density=density, BS_R=16, BS_C=1):
+def to_sparse(v):
     name = v.name_hint
     (N, K) = v.type_annotation.concrete_shape
     nnz = int(density * N * K)
-    num_blocks = int(nnz / (BS_R * BS_C)) + 1
-    v_data = relay.var(name + "_data", shape=(num_blocks, BS_R, BS_C), dtype="uint16")
-    v_indices = relay.var(name + "_indices", shape=(num_blocks,), dtype="int32")
-    v_indptr = relay.var(name + "_indptr", shape=(N // BS_R + 1,), dtype="int32")
-    return BSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, BS_R=BS_R, BS_C=BS_C, density=density)
+    v_data = relay.var(name + "_data", shape=(nnz,), dtype=dtype)
+    v_indices = relay.var(name + "_indices", shape=(nnz,), dtype="int32")
+    v_indptr = relay.var(name + "_indptr", shape=(N + 1,), dtype="int32")
+    return CSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, density=density)
 
 def approx_sigmoid(v):
     x = relay.abs(v)
@@ -49,6 +47,7 @@ def approx_sigmoid(v):
     e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
     e_pos = e / (C(1) + e)
     e_neg = C(1) / (C(1) + e)
+    # TODO: ensure this returns good code.
     return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
 
 def approx_tanh(v):
@@ -88,7 +87,7 @@ fc_1_B = relay.var("fc_1_B",
                    dtype=dtype)
 relu1_o = relay.nn.relu(sparse_dense(gru2_add1_o, fc_1_W, fc_1_B))
 
-fc_3_W = to_sparse(relay.var("fc_3_W", shape=(n_classes, fc_dims), dtype=dtype), density=0.4)
+fc_3_W = to_sparse(relay.var("fc_3_W", shape=(n_classes, fc_dims), dtype=dtype))
 fc_3_B = relay.var("fc_3_B", shape=(n_classes,), dtype=dtype)
 fc_3_o = sparse_dense(relu1_o, fc_3_W, fc_3_B)
 
@@ -123,18 +122,12 @@ def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
     assert s.indptr.shape == (M // BS_R + 1, )
     return s
 
-def to_bf16(x):
-    assert x.dtype == np.float32
-    return ((x.view('<u4') + 2 ** 15) >> 16).astype("uint16")
-
-
 def instantiate(param):
-    if isinstance(param, BSR):
+    if isinstance(param, CSR):
         import scipy.sparse as sp
-        param_np = random_bsr_matrix(M=param.N, N=param.K, BS_R=param.BS_R, BS_C=param.BS_C, density=param.density, dtype='float32')
-        print(param_np.data.shape)
+        param_np = sp.random(m=param.N, n=param.K, density=param.density, format='csr', dtype='float32')
         return [
-            (param.data.name_hint, tvm.ndarray.array(to_bf16(param_np.data))),
+            (param.data.name_hint, tvm.ndarray.array(param_np.data)),
             (param.indices.name_hint, tvm.ndarray.array(param_np.indices.astype("int32"))),
             (param.indptr.name_hint, tvm.ndarray.array(param_np.indptr.astype("int32"))),
         ]
@@ -147,6 +140,7 @@ def instantiate(param):
             )
             )
         ]
+
 params = collections.OrderedDict([(k, v) for param in param_vars for (k, v) in instantiate(param)])
 
 print("Total param size: ", sum(v.asnumpy().nbytes for v in params.values()))

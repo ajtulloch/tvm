@@ -250,7 +250,7 @@ def from_bf16(x):
 
 
 def test_sparse_dense_bsr():
-    M, N, K, BS_R, BS_C, density = 1, 64, 128, 8, 16, 0.2
+    M, N, K, BS_R, BS_C, density = 1, 64, 128, 8, 16, 0.9
     X_np = np.random.randn(M, K).astype("float32")
     W_sp_np = random_bsr_matrix(N, K, BS_R, BS_C, density=density, dtype="float32")
     W_np = W_sp_np.todense()
@@ -282,7 +282,7 @@ def test_bf16():
     np.testing.assert_allclose(x, x_rt, rtol=1e-2, atol=1e-2)
 
 def test_sparse_dense_bsr_bf16():
-    M, N, K, BS_R, BS_C, density = 1, 64, 128, 2, 2, 0.2
+    M, N, K, BS_R, BS_C, density = 1, 64, 128, 2, 2, 0.99
     X_np = np.random.randn(M, K).astype("float32")
     W_sp_np = random_bsr_matrix(N, K, BS_R, BS_C, density=density, dtype="float32")
     W_np = W_sp_np.todense()

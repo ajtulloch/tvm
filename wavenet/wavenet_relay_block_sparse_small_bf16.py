@@ -65,12 +65,12 @@ def gru(X, H, W_X, W_H, B, **kwargs):
     HT = relay.nn.sparse_dense(H, W_H)
     XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
     HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
-    # u_t = approx_sigmoid(XT_gates[0] + HT_gates[0])
-    # r_t = approx_sigmoid(XT_gates[1] + HT_gates[1])
-    # e_t = approx_tanh(r_t * HT_gates[2] + XT_gates[2])
-    u_t = relay.sigmoid(XT_gates[0] + HT_gates[0])
-    r_t = relay.sigmoid(XT_gates[1] + HT_gates[1])
-    e_t = relay.tanh(r_t * HT_gates[2] + XT_gates[2])
+    u_t = approx_sigmoid(XT_gates[0] + HT_gates[0])
+    r_t = approx_sigmoid(XT_gates[1] + HT_gates[1])
+    e_t = approx_tanh(r_t * HT_gates[2] + XT_gates[2])
+    # u_t = relay.sigmoid(XT_gates[0] + HT_gates[0])
+    # r_t = relay.sigmoid(XT_gates[1] + HT_gates[1])
+    # e_t = relay.tanh(r_t * HT_gates[2] + XT_gates[2])
     return u_t * HT_gates[0] + (relay.expr.const(1.0, dtype=dtype) - u_t) * e_t
 
 gru_0_W_X = to_sparse(relay.var("gru_0_W_X", shape=(3 * rnn_dims, rnn_dims), dtype=dtype))

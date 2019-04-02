@@ -28,12 +28,13 @@ fc1 = nn.Linear(rnn_dims + aux_dims, fc_dims)
 fc2 = nn.Linear(fc_dims, n_classes)
 
 def sample(x_prob):
-    # TODO: do SAMPLING
+    gumbel = -torch.log(-torch.log(torch.tensor(np.random.uniform(size=x_prob.shape).astype("float32"))))
     result = np.zeros((1, 1), dtype="float32")
-    result[:] = np.argmax(x_prob)
+    result[:] = np.argmax(x_prob - gumbel)
     return torch.tensor(result)
 
 def reference_frame(a1, a2, m, x_0, h1_0):
+    np.random.seed(10)
     with torch.no_grad():
         (x, h1) = (x_0, h1_0)
         T = a1.shape[0]
@@ -61,6 +62,7 @@ def test_pytorch_reference():
     np.testing.assert_allclose(h1_ref, h1_new)
 
 def factored_premul_frame(a1, a2, m, x_0, h1_0):
+    np.random.seed(10)
     with torch.no_grad():
         I_residual =  m @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1 @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
         fc1_residual = a2 @ fc1.weight[:, rnn_dims:].transpose(1, 0)
@@ -102,14 +104,11 @@ def factored_premul_frame(a1, a2, m, x_0, h1_0):
             outs.append(x)
         return outs, h1
 
-
-def factored_relay_frame(a1, a2, m, x_0, h1_0):
+def build_wavernn_module():
     from tvm import relay
     import tvm
 
     with torch.no_grad():
-        I_residual = m @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1 @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
-        fc1_residual = a2 @ fc1.weight[:, rnn_dims:].transpose(1, 0)
         Ifactored = nn.Linear(1, rnn_dims)
         Ifactored.weight[:, :] = I.weight[:, :1]
         Ifactored.bias[:] = I.bias[:]
@@ -135,8 +134,6 @@ def factored_relay_frame(a1, a2, m, x_0, h1_0):
     Rh1 = relay.var("h1", shape=[1, rnn_dims], dtype="float32")
     RI_residual = relay.var("I_residual", shape=[1, rnn_dims], dtype="float32")
     Rfc1_residual = relay.var("fc1_residual", shape=[1, fc_dims], dtype="float32")
-
-
     RI_W = relay.var("I_W", shape=(rnn_dims, 1), dtype="float32")
     RI_B = relay.var("I_B", shape=(rnn_dims,), dtype="float32")
 
@@ -144,8 +141,6 @@ def factored_relay_frame(a1, a2, m, x_0, h1_0):
 
     def dense(X, W, B, **kwargs):
         return relay.nn.bias_add(relay.nn.dense(X, W), B)
-
-    xconcat_trns = dense(Rx, RI_W, RI_B) + RI_residual
 
     def gru_cell(cell, x, h):
         xt = dense(x, cell.weight_ih, cell.bias_ih)
@@ -156,6 +151,8 @@ def factored_relay_frame(a1, a2, m, x_0, h1_0):
         input_gate = relay.sigmoid(xt_gates[1] + ht_gates[1])
         new_gate = relay.tanh(xt_gates[2] + reset_gate * ht_gates[2])
         return new_gate + input_gate * (h - new_gate)
+
+    xconcat_trns = dense(Rx, RI_W, RI_B) + RI_residual
 
     Rrnn1 = Cell(
         weight_ih=relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
@@ -183,21 +180,30 @@ def factored_relay_frame(a1, a2, m, x_0, h1_0):
 
     module = tvm.contrib.graph_runtime.create(graph, lib, tvm.cpu(0))
     module.set_input(**params)
+    return module
+
+def factored_relay_frame(a1, a2, m, x_0, h1_0):
+    import tvm
+    np.random.seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
     outs = []
     T = a1.shape[0]
+    module = build_wavernn_module()
+    I_residual = m @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1 @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
+    fc1_residual = a2 @ fc1.weight[:, rnn_dims:].transpose(1, 0)
+
     for t in range(T):
         inputs = {
             "x": x,
             "h1": h1,
-            "I_residual": tvm.ndarray.array(I_residual[t:t+1]),
-            "fc1_residual": tvm.ndarray.array(fc1_residual[t:t+1]),
+            "I_residual": tvm.ndarray.array(I_residual[t:t+1].detach().numpy()),
+            "fc1_residual": tvm.ndarray.array(fc1_residual[t:t+1].detach().numpy()),
         }
 
         module.set_input(**inputs)
         module.run()
         (x_prob, h1) = module.get_output(0), module.get_output(1)
-        x = tvm.ndarray.array(sample(x_prob.asnumpy()))
+        x = tvm.ndarray.array(sample(torch.tensor(x_prob.asnumpy())))
         outs.append(x.asnumpy()[0][0])
     return outs, h1.asnumpy()
 

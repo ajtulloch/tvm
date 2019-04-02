@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import numpy as np
 import collections
 import tvm
+from tvm import relay
+
 
 torch.manual_seed(42)
 
@@ -127,8 +129,6 @@ def factored_premul_frame(a1, a2, m, x_0, h1_0):
     return outs, h1
 
 def build_wavernn_module():
-    from tvm import relay
-
     Ifactored = nn.Linear(1, rnn_dims)
     Ifactored.weight[:, :] = I.weight[:, :1]
     Ifactored.bias[:] = I.bias[:]
@@ -197,17 +197,16 @@ def build_wavernn_module():
     func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
     func = relay.ir_pass.infer_type(func)
     graph, lib, params = relay.build_module.build(func, target="llvm", params=params)
-
-    module = tvm.contrib.graph_runtime.create(graph, lib, tvm.cpu(0))
-    module.set_input(**params)
-    return module
+    return (graph, lib, params)
 
 def factored_relay_frame(a1, a2, m, x_0, h1_0):
     tvm_random_seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
     outs = []
     T = a1.shape[1]
-    module = build_wavernn_module()
+    (graph, lib, params) = build_wavernn_module()
+    module = tvm.contrib.graph_runtime.create(graph, lib, tvm.cpu(0))
+    module.set_input(**params)
 
     I_residual = m[0] @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1[0] @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
     fc1_residual = a2[0] @ fc1.weight[:, rnn_dims:].transpose(1, 0)
@@ -231,8 +230,10 @@ def factored_relay_cpp_frame(a1, a2, m, x_0, h1_0):
     tvm_random_seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
     T = a1.shape[1]
-    module = build_wavernn_module()
-
+    (graph, lib, params) = build_wavernn_module()
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, prefix="tvm_model_lib", suffix=".so") as lib_f:
+        lib.export_library(lib_f.name)
     I_residual = m[0] @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1[0] @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
     fc1_residual = a2[0] @ fc1.weight[:, rnn_dims:].transpose(1, 0)
 
@@ -246,15 +247,17 @@ def factored_relay_cpp_frame(a1, a2, m, x_0, h1_0):
         tvm.ndarray.array(fc1_residual),
         tvm.ndarray.array(x_0),
         tvm.ndarray.array(h1_0),
-        # Runtime module
-        module.module,
         # Outputs
         outs,
         h1,
-        # Purely for temp-storage
+        # Temporary storage to make entire frame_func allocation free.
         tvm.ndarray.array(np.random.randn(1, n_classes).astype("float32")),
         tvm.ndarray.array(np.random.randn(1, rnn_dims).astype("float32")),
         tvm.ndarray.array(np.random.randn(1, fc_dims).astype("float32")),
+        # Data for constructing the module.
+        graph,  # the graph JSON.
+        lib_f.name,  # the exported shared object.
+        relay.save_param_dict(params)  # the serialized parameters.
     )
     return outs.asnumpy(), h1.asnumpy()
 

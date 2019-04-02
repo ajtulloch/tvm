@@ -6,12 +6,11 @@ import collections
 import tvm
 from tvm import relay
 
-
 torch.manual_seed(42)
 
 
-rnn_dims = 512
-fc_dims = 512
+rnn_dims = 1024
+fc_dims = 1024
 
 feat_dims = 19
 aux_dims = 64
@@ -128,7 +127,7 @@ def factored_premul_frame(a1, a2, m, x_0, h1_0):
         outs.append(x)
     return outs, h1
 
-def build_wavernn_module():
+def build_wavernn_module(target="llvm"):
     Ifactored = nn.Linear(1, rnn_dims)
     Ifactored.weight[:, :] = I.weight[:, :1]
     Ifactored.bias[:] = I.bias[:]
@@ -196,7 +195,7 @@ def build_wavernn_module():
     outputs = relay.expr.Tuple([x_prob, h1])
     func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
     func = relay.ir_pass.infer_type(func)
-    graph, lib, params = relay.build_module.build(func, target="llvm", params=params)
+    graph, lib, params = relay.build_module.build(func, target=target, params=params)
     return (graph, lib, params)
 
 def factored_relay_frame(a1, a2, m, x_0, h1_0):
@@ -281,3 +280,17 @@ def test_relay_cpp_frame():
         outs_new, h1_new = factored_relay_cpp_frame(a1, a2, m, x_0, h1_0)
         np.testing.assert_allclose(outs_ref, outs_new, rtol=1e-4, atol=1e-4)
         np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
+
+
+(graph, lib, params) = build_wavernn_module("llvm -mcpu=core-avx2 -target=x86_64-linux-gnu")
+with open(
+        "wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
+        "w") as f:
+    f.write(graph)
+
+with open(
+        "wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_params.bin".format(**globals()),
+        "wb") as f:
+    f.write(relay.save_param_dict(params))
+
+lib.export_library("wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.so".format(**globals()))

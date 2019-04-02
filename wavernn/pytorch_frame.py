@@ -10,17 +10,17 @@ torch.manual_seed(42)
 rnn_dims = 512
 fc_dims = 512
 
-feat_dims = 24
-aux_dims = 32
+feat_dims = 19
+aux_dims = 64
 n_classes = 2 ** 8
 
 T = 8
 
 x_0 = torch.randn(1, 1)
 h1_0 = torch.randn(1, rnn_dims)
-m = torch.randn(T, feat_dims)
-a1 = torch.randn(T, aux_dims)
-a2 = torch.randn(T, aux_dims)
+m = torch.randn(1, T, feat_dims)
+a1 = torch.randn(1, T, aux_dims)
+a2 = torch.randn(1, T, aux_dims)
 
 I = nn.Linear(feat_dims + aux_dims + 1, rnn_dims)
 rnn1 = nn.GRUCell(rnn_dims, rnn_dims)
@@ -31,7 +31,7 @@ def sample(x_prob):
     gumbel = -torch.log(-torch.log(torch.tensor(np.random.uniform(size=x_prob.shape).astype("float32"))))
     result = np.zeros((1, 1), dtype="float32")
     result[:] = np.argmax(x_prob - gumbel)
-    return torch.tensor(result)
+    return torch.tensor(result / n_classes)
 
 def reference_frame(a1, a2, m, x_0, h1_0):
     np.random.seed(10)
@@ -40,11 +40,11 @@ def reference_frame(a1, a2, m, x_0, h1_0):
         T = a1.shape[0]
         outs = []
         for t in range(T):
-            xconcat = torch.cat([x, m[t:t+1], a1[t:t+1]], dim=1)
+            xconcat = torch.cat([x, m[0, t:t+1], a1[0, t:t+1]], dim=1)
             xconcat_trns = I(xconcat)
             h1 = rnn1(xconcat_trns, h1)
             xres = xconcat_trns + h1
-            xres_concat = torch.cat([xres, a2[t:t+1]], dim=1)
+            xres_concat = torch.cat([xres, a2[0, t:t+1]], dim=1)
             x_fc = F.relu(fc1(xres_concat))
             x_prob = fc2(x_fc)
             x = sample(x_prob)
@@ -64,8 +64,8 @@ def test_pytorch_reference():
 def factored_premul_frame(a1, a2, m, x_0, h1_0):
     np.random.seed(10)
     with torch.no_grad():
-        I_residual =  m @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1 @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
-        fc1_residual = a2 @ fc1.weight[:, rnn_dims:].transpose(1, 0)
+        I_residual =  m[0] @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1[0] @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
+        fc1_residual = a2[0] @ fc1.weight[:, rnn_dims:].transpose(1, 0)
         I_weight = I.weight[:]
         I_bias = I.bias[:]
 
@@ -189,8 +189,9 @@ def factored_relay_frame(a1, a2, m, x_0, h1_0):
     outs = []
     T = a1.shape[0]
     module = build_wavernn_module()
-    I_residual = m @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1 @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
-    fc1_residual = a2 @ fc1.weight[:, rnn_dims:].transpose(1, 0)
+
+    I_residual = m[0] @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1[0] @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
+    fc1_residual = a2[0] @ fc1.weight[:, rnn_dims:].transpose(1, 0)
 
     for t in range(T):
         inputs = {

@@ -3,6 +3,7 @@ from torch import nn
 import torch.nn.functional as F
 import numpy as np
 import collections
+import tvm
 
 torch.manual_seed(42)
 
@@ -28,11 +29,9 @@ fc1 = nn.Linear(rnn_dims + aux_dims, fc_dims)
 fc2 = nn.Linear(fc_dims, n_classes)
 
 def tvm_random_seed(seed):
-    import tvm
     tvm.get_global_func("tvm.contrib.wavernn.set_seed")(seed)
 
 def tvm_random_uniform():
-    import tvm
     return tvm.get_global_func("tvm.contrib.wavernn.random_uniform")()
 
 
@@ -129,7 +128,6 @@ def factored_premul_frame(a1, a2, m, x_0, h1_0):
 
 def build_wavernn_module():
     from tvm import relay
-    import tvm
 
     Ifactored = nn.Linear(1, rnn_dims)
     Ifactored.weight[:, :] = I.weight[:, :1]
@@ -205,7 +203,6 @@ def build_wavernn_module():
     return module
 
 def factored_relay_frame(a1, a2, m, x_0, h1_0):
-    import tvm
     tvm_random_seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
     outs = []
@@ -231,7 +228,6 @@ def factored_relay_frame(a1, a2, m, x_0, h1_0):
     return outs, h1.asnumpy()
 
 def factored_relay_cpp_frame(a1, a2, m, x_0, h1_0):
-    import tvm
     tvm_random_seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
     T = a1.shape[1]

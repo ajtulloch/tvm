@@ -27,13 +27,16 @@ def schedule_sparse_dense(outs):
             s[Y_reshape].unroll(noo)
             s[Y_bsrmv].compute_at(s[Y_reshape], noi)
             s[Y_reshape].vectorize(noi)
+            s[Y_reshape].unroll(mo)
             if op != s[outs[0]].op:
                 (yo, yi) = s[outs[0].op].split(s[outs[0].op].op.axis[1], 32)
                 s[Y_reshape].compute_at(s[outs[0]], yo)
-                s[outs[0].op].parallel(yo)
+                # s[outs[0].op].parallel(yo)
+                s[outs[0].op].unroll(yo)
                 s[outs[0].op].vectorize(yi)
             else:
-                s[Y_reshape].parallel(noo)
+                # s[Y_reshape].parallel(noo)
+                s[Y_reshape].unroll(noo)
 
     traverse_inline(s, outs[0].op, callback)
     return s

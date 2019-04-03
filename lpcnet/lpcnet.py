@@ -10,6 +10,7 @@ import tvm.contrib.debugger.debug_runtime as debug_runtime
 import tvm.contrib.graph_runtime as graph_runtime
 import torch
 import logging
+logging.basicConfig(level=logging.DEBUG)
 import collections
 import netron
 import tempfile
@@ -78,7 +79,9 @@ def approx_sigmoid(v):
     e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
     e_pos = e / (C(1) + e)
     e_neg = C(1) / (C(1) + e)
-    return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+    # TODO: debug why pass.VectorizeLoop doesn't like select()?
+    return e_pos
+    # return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
 
 def approx_tanh(v):
     x = relay.abs(v)
@@ -94,12 +97,9 @@ def gru(X0, X1, H, W_X0, W_X1, W_H, B_X, B_H, **kwargs):
     HT = relay.nn.bias_add(relay.nn.dense(H, W_H), B_H)
     XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
     HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
-    # u_t = approx_sigmoid(XT_gates[0] + HT_gates[0])
-    # r_t = approx_sigmoid(XT_gates[1] + HT_gates[1])
-    # e_t = approx_tanh(r_t * HT_gates[2] + XT_gates[2])
-    u_t = relay.sigmoid(XT_gates[0] + HT_gates[0])
-    r_t = relay.sigmoid(XT_gates[1] + HT_gates[1])
-    e_t = relay.tanh(r_t * HT_gates[2] + XT_gates[2])
+    u_t = approx_sigmoid(XT_gates[0] + HT_gates[0])
+    r_t = approx_sigmoid(XT_gates[1] + HT_gates[1])
+    e_t = approx_tanh(r_t * HT_gates[2] + XT_gates[2])
     return e_t + u_t * (H - e_t)
 
 def sparse_gru(XT, H, W_H, B_H, W_H_DIAG):
@@ -109,14 +109,14 @@ def sparse_gru(XT, H, W_H, B_H, W_H_DIAG):
     HT_gates_0 = HT_gates[0] + W_H_DIAG[0] * H
     HT_gates_1 = HT_gates[1] + W_H_DIAG[1] * H
     HT_gates_2 = HT_gates[2] + W_H_DIAG[2] * H
-    u_t = relay.sigmoid(XT_gates[0] + HT_gates_0)
-    r_t = relay.sigmoid(XT_gates[1] + HT_gates_1)
-    e_t = relay.tanh(r_t * HT_gates_2 + XT_gates[2])
+    u_t = approx_sigmoid(XT_gates[0] + HT_gates_0)
+    r_t = approx_sigmoid(XT_gates[1] + HT_gates_1)
+    e_t = approx_tanh(r_t * HT_gates_2 + XT_gates[2])
     return e_t + u_t * (H - e_t)
 
 
 def dual_fc(x, W, B, A):
-    dual_output = A * relay.tanh(relay.nn.bias_add(relay.nn.dense(x, W), B))
+    dual_output = A * approx_tanh(relay.nn.bias_add(relay.nn.dense(x, W), B))
     dual_output_gates = relay.split(dual_output, indices_or_sections=2, axis=1)
     return dual_output_gates[0] + dual_output_gates[1]
 
@@ -128,7 +128,7 @@ FEATURE_DENSE2_OUT_SIZE = 128
 gru_a_condition = relay.var("gru_a_condition", shape=(1, 3 * GRU_A_STATE_SIZE))
 gru_b_condition = relay.var("gru_b_condition", shape=(1, FEATURE_DENSE2_OUT_SIZE))
 
-last_sig = relay.var("last_ sig", shape=[1], dtype="int32")
+last_sig = relay.var("last_sig", shape=[1], dtype="int32")
 pred = relay.var("pred", shape=[1], dtype="int32")
 last_exc = relay.var("last_exc", shape=[1], dtype="int32")
 
@@ -139,12 +139,7 @@ gru_a_embedding_sig = relay.var("gru_a_embedding_sig", shape=(256, 3 * GRU_A_STA
 gru_a_embedding_pred = relay.var("gru_a_embedding_pred", shape=(256, 3 * GRU_A_STATE_SIZE,))
 gru_a_embedding_last_exc = relay.var("gru_a_embedding_last_exc", shape=(256, 3 * GRU_A_STATE_SIZE,))
 
-gru_a_input = gru_a_condition # TODO: gather + relay.gather_nd(gru_a_embedding_sig, last_sig) + relay.gather_nd(gru_a_embedding_pred, pred) + relay.gather_nd(gru_a_embedding_last_exc, last_exc)
-
-gru_a_diag_weights_0 = relay.var("gru_a_diag_weights_0", shape=(1, GRU_A_STATE_SIZE,))
-gru_a_diag_weights_1 = relay.var("gru_a_diag_weights_1", shape=(1, GRU_A_STATE_SIZE,))
-gru_a_diag_weights_2 = relay.var("gru_a_diag_weights_2", shape=(1, GRU_A_STATE_SIZE,))
-
+gru_a_input = gru_a_condition + relay.take(gru_a_embedding_sig, last_sig, axis=0) + relay.take(gru_a_embedding_pred, pred, axis=0) + relay.take(gru_a_embedding_last_exc, last_exc, axis=0)
 
 gru_a_W_H = to_sparse(
     relay.var("gru_a_W_H",
@@ -152,7 +147,12 @@ gru_a_W_H = to_sparse(
     density=GRU_A_DENSITY)
 gru_a_B_H = relay.var("gru_a_W_H", shape=(3 * GRU_A_STATE_SIZE, ))
 
-gru_a_next_hidden_state = sparse_gru(gru_a_input, gru_a_hidden_state, gru_a_W_H, gru_a_B_H, [gru_a_diag_weights_0, gru_a_diag_weights_1, gru_a_diag_weights_2])
+gru_a_WD_0 = relay.var("gru_a_WD_0", shape=(1, GRU_A_STATE_SIZE,))
+gru_a_WD_1 = relay.var("gru_a_WD_1", shape=(1, GRU_A_STATE_SIZE,))
+gru_a_WD_2 = relay.var("gru_a_WD_2", shape=(1, GRU_A_STATE_SIZE,))
+
+
+gru_a_next_hidden_state = sparse_gru(gru_a_input, gru_a_hidden_state, gru_a_W_H, gru_a_B_H, [gru_a_WD_0, gru_a_WD_1, gru_a_WD_2])
 
 
 gru_b_W_H = relay.var("gru_b_W_H", shape=(3 * GRU_B_STATE_SIZE, GRU_B_STATE_SIZE))
@@ -167,7 +167,9 @@ dual_fc_W = relay.var("dual_fc_W", shape=(512, 16))
 dual_fc_B = relay.var("dual_fc_B", shape=(512, ))
 dual_fc_A = relay.var("dual_fc_A", shape=(512, ))
 
-output = relay.nn.softmax(dual_fc(gru_b_next_hidden_state, dual_fc_W, dual_fc_B, dual_fc_A), axis=1)
+approx_softmax = approx_sigmoid
+output = approx_softmax(dual_fc(gru_b_next_hidden_state, dual_fc_W, dual_fc_B, dual_fc_A))
+
 
 outputs = relay.expr.Tuple([output])
 
@@ -176,7 +178,8 @@ relay.ir_pass.infer_type(func)
 
 param_vars = [
     gru_a_W_H, gru_a_B_H,
-    gru_a_diag_weights_0, gru_a_diag_weights_1, gru_a_diag_weights_2,
+    gru_a_WD_0, gru_a_WD_1, gru_a_WD_2,
+    gru_a_embedding_sig, gru_a_embedding_pred, gru_a_embedding_last_exc,
     gru_b_W_H, gru_b_W_X0, gru_b_W_X1, gru_b_B_H, gru_b_B_X,
     dual_fc_W, dual_fc_B, dual_fc_A,
 ]
@@ -188,6 +191,9 @@ for k, v in params.items():
     print(k, v.asnumpy().size)
 
 input_vars = [
+    last_sig,
+    pred,
+    last_exc,
     gru_a_condition,
     gru_b_condition,
     gru_a_hidden_state,
@@ -204,7 +210,7 @@ inputs = collections.OrderedDict(
 
 skl_target = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
 
-
+log_filename = "lpcnet_autotvm_skl.log"
 def tune():
     global func
     with relay.build_config(opt_level=2):
@@ -224,13 +230,13 @@ def tune():
                 runner=autotvm.RPCRunner(
                     'skl',
                     '0.0.0.0',
-                    9196,
+                    9198,
                     number=100,
                     repeat=5,
                     min_repeat_ms=1000,
                     timeout=100)
             )
-            log_filename = "synthesis_autotvm_skl.log"
+
             tuner_obj.tune(
                 n_trial=min(n_trial, len(tsk.config_space)),
                 early_stopping=early_stopping,
@@ -241,13 +247,13 @@ def tune():
                 ]
             )
 
-if 1:
+if 0:
     tune()
     # import sys
     # sys.exit()
 
 
-with autotvm.apply_history_best("synthesis_autotvm_skl.best.log"):
+with autotvm.apply_history_best(log_filename):
     with relay.build_config(opt_level=3):
         func = relay.optimize(func, target=skl_target, params=params)
         print(func.astext(show_meta_data=False))
@@ -268,7 +274,7 @@ tmp = tvm.contrib.util.tempdir()
 lib_fname = tmp.relpath('net.tar')
 with skl_target:
     lib.export_library(lib_fname)
-tracker = tvm.rpc.connect_tracker('0.0.0.0', 9196)
+tracker = tvm.rpc.connect_tracker('0.0.0.0', 9198)
 remote = tracker.request('skl')
 
 remote.upload(lib_fname)

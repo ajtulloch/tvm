@@ -617,7 +617,8 @@ inline Tensor take(const Tensor& a,
   if (mode == "clip") {
     return compute(
         out_shape, [&](const Array<Var>& out_index) {
-          auto idx = tvm::min(tvm::max(0, indices(out_index)), a_size - 1);
+          // auto idx = tvm::min(tvm::max(0, indices(out_index)), a_size - 1);
+          auto idx = indices(out_index);
           return a(UnravelIndex(idx, a_shape));
         }, name, tag);
   } else {  // mode == "wrap"
@@ -676,8 +677,9 @@ inline Tensor take(const Tensor& a,
           for (size_t j = 0; j < static_cast<size_t>(axis); ++j) {
             real_indices.push_back(out_index[j]);
           }
-          auto idx = tvm::min(tvm::max(0, indices(indices_position)),
-                              axis_dim - 1);
+          /* auto idx = tvm::min(tvm::max(0, indices(indices_position)), */
+          /*                     axis_dim - 1); */
+          auto idx = indices(indices_position);
           real_indices.push_back(idx);
           for (size_t j = axis + indices_len; j < out_index.size(); ++j) {
             real_indices.push_back(out_index[j]);

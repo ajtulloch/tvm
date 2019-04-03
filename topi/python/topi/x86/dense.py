@@ -53,7 +53,7 @@ def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", ou
 
 
     cfg.define_knob('pretranspose', [0, 1])
-    cfg.define_knob('blas', [0, 1])
+    cfg.define_knob('blas', [0,])
     if kernel_layout == "OI" and cfg['pretranspose'].val:
         import topi
         weight = topi.transpose(weight, [1, 0])
@@ -62,7 +62,7 @@ def dense(cfg, data, weight, bias=None, data_layout="NI", kernel_layout="OI", ou
         assert kernel_layout == "IO"
 
     k = tvm.reduce_axis((0, in_dim), name='k')
-    cfg.define_split("tile_y", cfg.axis(out_dim), num_outputs=2, filter=lambda x: x.size[-1] % 16 == 0)
+    cfg.define_split("tile_y", cfg.axis(out_dim), num_outputs=2, filter=lambda x: x.size[-1] % 8 == 0)
     if cfg['blas'].val == 0 or weight.dtype != "float32":
         def weight_lookup(j, k):
             val = weight[k, j] if kernel_layout == "IO" else weight[j, k]

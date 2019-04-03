@@ -15,100 +15,15 @@ import netron
 import tempfile
 
 import collections
-CSR = collections.namedtuple('CSR', ['data', 'indices', 'indptr', 'N', 'K', 'density'])
 
-def sparse_dense(X, W, B, **kwargs):
-    return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
-
-def to_sparse(v):
-    name = v.name_hint
-    (N, K) = v.type_annotation.concrete_shape
-    nnz = int(density * N * K)
-    v_data = relay.var(name + "_data", shape=(nnz,), dtype=dtype)
-    v_indices = relay.var(name + "_indices", shape=(nnz,), dtype="int32")
-    v_indptr = relay.var(name + "_indptr", shape=(N + 1,), dtype="int32")
-    return CSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, density=density)
-
-def approx_sigmoid(v):
-    x = relay.abs(v)
-    x2 = v * v
-    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
-    e_pos = e / (C(1) + e)
-    e_neg = C(1) / (C(1) + e)
-    # TODO: ensure this returns good code.
-    return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
-
-def approx_tanh(v):
-    x = relay.abs(v)
-    x2 = v * v
-    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
-    return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
-
-def C(x):
-    return relay.expr.const(x, dtype)
-
-def gru(X, H, W_X, W_H, B, **kwargs):
-    XT = relay.nn.bias_add(relay.nn.sparse_dense(X, W_X), B)
-    HT = relay.nn.sparse_dense(H, W_H)
-    XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
-    HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
-    # u_t = approx_sigmoid(XT_gates[0] + HT_gates[0])
-    # r_t = approx_sigmoid(XT_gates[1] + HT_gates[1])
-    # e_t = approx_tanh(r_t * HT_gates[2] + XT_gates[2])
-    u_t = relay.sigmoid(XT_gates[0] + HT_gates[0])
-    r_t = relay.sigmoid(XT_gates[1] + HT_gates[1])
-    e_t = relay.tanh(r_t * HT_gates[2] + XT_gates[2])
-    return u_t * HT_gates[0] + (relay.expr.const(1.0, dtype=dtype) - u_t) * e_t
-
-
-dtype = "float32"
-
-GRU_A_STATE_SIZE = 384
-
-
-last_sig = relay.var("last_sig", shape=[1, 1], dtype="int32")
-pred = relay.var("pred", shape=[1, 1], dtype="int32")
-last_exc = relay.var("last_exc", shape=[1, 1], dtype="int32")
-
-h1 = relay.var("h1", shape=[1, GRU_A_STATE_SIZE], dtype=dtype)
+BSR = collections.namedtuple(
+    'BSR',
+    ['data', 'indices', 'indptr', 'N', 'K', 'BS_R', 'BS_C', 'density'])
 
 
 
-
-gru_0_W_X = to_sparse(relay.var("gru_0_W_X", shape=(3 * rnn_dims, rnn_dims), dtype=dtype))
-gru_0_W_H = to_sparse(relay.var("gru_0_W_H", shape=(3 * rnn_dims, rnn_dims), dtype=dtype))
-gru_0_B = relay.var("gru_0_B", shape=(3 * rnn_dims,), dtype=dtype)
-
-h1_prime = gru(x, h1, gru_0_W_X, gru_0_W_H, gru_0_B)
-gru2_add1_o = x + h1_prime
-
-fc_1_W = to_sparse(relay.var("fc_1_W",
-                   shape=(fc_dims, rnn_dims, ),
-                   dtype=dtype))
-fc_1_B = relay.var("fc_1_B",
-                   shape=(fc_dims,),
-                   dtype=dtype)
-relu1_o = relay.nn.relu(sparse_dense(gru2_add1_o, fc_1_W, fc_1_B))
-
-fc_3_W = to_sparse(relay.var("fc_3_W", shape=(n_classes, fc_dims), dtype=dtype))
-fc_3_B = relay.var("fc_3_B", shape=(n_classes,), dtype=dtype)
-fc_3_o = sparse_dense(relu1_o, fc_3_W, fc_3_B)
-
-softmax_o = relay.nn.softmax(fc_3_o, axis=-1)
-
-outputs = relay.expr.Tuple([fc_3_o])
-
-func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
-relay.ir_pass.infer_type(func)
-
-param_vars = [
-    gru_0_W_X, gru_0_W_H, gru_0_B, fc_1_W, fc_1_B, fc_3_W, fc_3_B
-]
-
-
-
-def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
-    Y = np.zeros((M, N), dtype=dtype)
+def random_bsr_matrix(M, N, BS_R, BS_C, density):
+    Y = np.zeros((M, N), dtype="float32")
     assert M % BS_R == 0
     assert N % BS_C == 0
     nnz = int(density * M * N)
@@ -118,7 +33,7 @@ def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
     chosen_blocks = candidate_blocks[np.random.choice(candidate_blocks.shape[0], size=num_blocks, replace=False)]
     for i in range(len(chosen_blocks)):
         r, c = chosen_blocks[i]
-        Y[r:r + BS_R, c:c + BS_C] = np.random.randn(BS_R, BS_C)
+        Y[r:r + BS_R, c:c + BS_C] = np.random.randn(BS_R, BS_C).astype("float32")
     s = sp.bsr_matrix(Y, blocksize=(BS_R, BS_C))
     assert s.data.shape == (num_blocks, BS_R, BS_C)
     assert s.indices.shape == (num_blocks, )
@@ -126,9 +41,8 @@ def random_bsr_matrix(M, N, BS_R, BS_C, density, dtype):
     return s
 
 def instantiate(param):
-    if isinstance(param, CSR):
-        import scipy.sparse as sp
-        param_np = sp.random(m=param.N, n=param.K, density=param.density, format='csr', dtype='float32')
+    if isinstance(param, BSR):
+        param_np = random_bsr_matrix(M=param.N, N=param.K, BS_R=param.BS_R, BS_C=param.BS_C, density=param.density)
         return [
             (param.data.name_hint, tvm.ndarray.array(param_np.data)),
             (param.indices.name_hint, tvm.ndarray.array(param_np.indices.astype("int32"))),
@@ -144,10 +58,142 @@ def instantiate(param):
             )
         ]
 
+def sparse_dense(X, W, B, **kwargs):
+    return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
+
+def to_sparse(v, density, BS_R=16, BS_C=1):
+    name = v.name_hint
+    (N, K) = v.type_annotation.concrete_shape
+    nnz = int(density * N * K)
+    num_blocks = int(nnz / (BS_R * BS_C)) + 1
+    v_data = relay.var(name + "_data", shape=(num_blocks, BS_R, BS_C), dtype="uint16")
+    v_indices = relay.var(name + "_indices", shape=(num_blocks,), dtype="int32")
+    v_indptr = relay.var(name + "_indptr", shape=(N // BS_R + 1,), dtype="int32")
+    return BSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, BS_R=BS_R, BS_C=BS_C, density=density)
+
+
+def approx_sigmoid(v):
+    x = relay.abs(v)
+    x2 = v * v
+    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
+    e_pos = e / (C(1) + e)
+    e_neg = C(1) / (C(1) + e)
+    return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+
+def approx_tanh(v):
+    x = relay.abs(v)
+    x2 = v * v
+    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
+    return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
+
+def C(x):
+    return relay.expr.const(x, "float32")
+
+def gru(X0, X1, H, W_X0, W_X1, W_H, B_X, B_H, **kwargs):
+    XT = relay.nn.bias_add(relay.nn.dense(X0, W_X0) + relay.nn.dense(X1, W_X1), B_X)
+    HT = relay.nn.bias_add(relay.nn.dense(H, W_H), B_H)
+    XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
+    HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
+    # u_t = approx_sigmoid(XT_gates[0] + HT_gates[0])
+    # r_t = approx_sigmoid(XT_gates[1] + HT_gates[1])
+    # e_t = approx_tanh(r_t * HT_gates[2] + XT_gates[2])
+    u_t = relay.sigmoid(XT_gates[0] + HT_gates[0])
+    r_t = relay.sigmoid(XT_gates[1] + HT_gates[1])
+    e_t = relay.tanh(r_t * HT_gates[2] + XT_gates[2])
+    return e_t + u_t * (H - e_t)
+
+def sparse_gru(XT, H, W_H, B_H, W_H_DIAG):
+    HT = relay.nn.bias_add(relay.nn.sparse_dense(H, W_H), B_H)
+    XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
+    HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
+    HT_gates_0 = HT_gates[0] + W_H_DIAG[0] * H
+    HT_gates_1 = HT_gates[1] + W_H_DIAG[1] * H
+    HT_gates_2 = HT_gates[2] + W_H_DIAG[2] * H
+    u_t = relay.sigmoid(XT_gates[0] + HT_gates_0)
+    r_t = relay.sigmoid(XT_gates[1] + HT_gates_1)
+    e_t = relay.tanh(r_t * HT_gates_2 + XT_gates[2])
+    return e_t + u_t * (H - e_t)
+
+
+def dual_fc(x, W, B, A):
+    dual_output = A * relay.tanh(relay.nn.bias_add(relay.nn.dense(x, W), B))
+    dual_output_gates = relay.split(dual_output, indices_or_sections=2, axis=1)
+    return dual_output_gates[0] + dual_output_gates[1]
+
+GRU_A_STATE_SIZE = 384
+GRU_A_DENSITY = 0.1
+GRU_B_STATE_SIZE = 16
+FEATURE_DENSE2_OUT_SIZE = 128
+
+gru_a_condition = relay.var("gru_a_condition", shape=(1, 3 * GRU_A_STATE_SIZE))
+gru_b_condition = relay.var("gru_b_condition", shape=(1, FEATURE_DENSE2_OUT_SIZE))
+
+last_sig = relay.var("last_ sig", shape=[1], dtype="int32")
+pred = relay.var("pred", shape=[1], dtype="int32")
+last_exc = relay.var("last_exc", shape=[1], dtype="int32")
+
+gru_a_hidden_state = relay.var("gru_a_hidden_state", shape=[1, GRU_A_STATE_SIZE])
+gru_b_hidden_state = relay.var("gru_b_hidden_state", shape=[1, GRU_B_STATE_SIZE])
+
+gru_a_embedding_sig = relay.var("gru_a_embedding_sig", shape=(256, 3 * GRU_A_STATE_SIZE,))
+gru_a_embedding_pred = relay.var("gru_a_embedding_pred", shape=(256, 3 * GRU_A_STATE_SIZE,))
+gru_a_embedding_last_exc = relay.var("gru_a_embedding_last_exc", shape=(256, 3 * GRU_A_STATE_SIZE,))
+
+gru_a_input = gru_a_condition # TODO: gather + relay.gather_nd(gru_a_embedding_sig, last_sig) + relay.gather_nd(gru_a_embedding_pred, pred) + relay.gather_nd(gru_a_embedding_last_exc, last_exc)
+
+gru_a_diag_weights_0 = relay.var("gru_a_diag_weights_0", shape=(1, GRU_A_STATE_SIZE,))
+gru_a_diag_weights_1 = relay.var("gru_a_diag_weights_1", shape=(1, GRU_A_STATE_SIZE,))
+gru_a_diag_weights_2 = relay.var("gru_a_diag_weights_2", shape=(1, GRU_A_STATE_SIZE,))
+
+
+gru_a_W_H = to_sparse(
+    relay.var("gru_a_W_H",
+              shape=(3 * GRU_A_STATE_SIZE, GRU_A_STATE_SIZE)),
+    density=GRU_A_DENSITY)
+gru_a_B_H = relay.var("gru_a_W_H", shape=(3 * GRU_A_STATE_SIZE, ))
+
+gru_a_next_hidden_state = sparse_gru(gru_a_input, gru_a_hidden_state, gru_a_W_H, gru_a_B_H, [gru_a_diag_weights_0, gru_a_diag_weights_1, gru_a_diag_weights_2])
+
+
+gru_b_W_H = relay.var("gru_b_W_H", shape=(3 * GRU_B_STATE_SIZE, GRU_B_STATE_SIZE))
+gru_b_W_X0 = relay.var("gru_b_W_X0", shape=(3 * GRU_B_STATE_SIZE, GRU_A_STATE_SIZE))
+gru_b_W_X1 = relay.var("gru_b_W_X1", shape=(3 * GRU_B_STATE_SIZE, FEATURE_DENSE2_OUT_SIZE))
+gru_b_B_H = relay.var("gru_b_B_H", shape=(3 * GRU_B_STATE_SIZE, ))
+gru_b_B_X = relay.var("gru_b_B_X", shape=(3 * GRU_B_STATE_SIZE, ))
+
+gru_b_next_hidden_state = gru(gru_a_next_hidden_state, gru_b_condition, gru_b_hidden_state, gru_b_W_X0, gru_b_W_X1, gru_b_W_H, gru_b_B_X, gru_b_B_H)
+
+dual_fc_W = relay.var("dual_fc_W", shape=(512, 16))
+dual_fc_B = relay.var("dual_fc_B", shape=(512, ))
+dual_fc_A = relay.var("dual_fc_A", shape=(512, ))
+
+output = relay.nn.softmax(dual_fc(gru_b_next_hidden_state, dual_fc_W, dual_fc_B, dual_fc_A), axis=1)
+
+outputs = relay.expr.Tuple([output])
+
+func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
+relay.ir_pass.infer_type(func)
+
+param_vars = [
+    gru_a_W_H, gru_a_B_H,
+    gru_a_diag_weights_0, gru_a_diag_weights_1, gru_a_diag_weights_2,
+    gru_b_W_H, gru_b_W_X0, gru_b_W_X1, gru_b_B_H, gru_b_B_X,
+    dual_fc_W, dual_fc_B, dual_fc_A,
+]
+
 params = collections.OrderedDict([(k, v) for param in param_vars for (k, v) in instantiate(param)])
 
 print("Total param size: ", sum(v.asnumpy().nbytes for v in params.values()))
-input_vars = [x, h1]
+for k, v in params.items():
+    print(k, v.asnumpy().size)
+
+input_vars = [
+    gru_a_condition,
+    gru_b_condition,
+    gru_a_hidden_state,
+    gru_b_hidden_state,
+
+]
 inputs = collections.OrderedDict(
     [(
         param.name_hint,
@@ -155,7 +201,7 @@ inputs = collections.OrderedDict(
     ) for param in input_vars])
 
 
-logging.basicConfig(level=logging.DEBUG)
+
 skl_target = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
 
 
@@ -178,7 +224,7 @@ def tune():
                 runner=autotvm.RPCRunner(
                     'skl',
                     '0.0.0.0',
-                    9195,
+                    9196,
                     number=100,
                     repeat=5,
                     min_repeat_ms=1000,
@@ -195,10 +241,10 @@ def tune():
                 ]
             )
 
-if 0:
+if 1:
     tune()
-    import sys
-    sys.exit()
+    # import sys
+    # sys.exit()
 
 
 with autotvm.apply_history_best("synthesis_autotvm_skl.best.log"):
@@ -222,7 +268,7 @@ tmp = tvm.contrib.util.tempdir()
 lib_fname = tmp.relpath('net.tar')
 with skl_target:
     lib.export_library(lib_fname)
-tracker = tvm.rpc.connect_tracker('0.0.0.0', 9195)
+tracker = tvm.rpc.connect_tracker('0.0.0.0', 9196)
 remote = tracker.request('skl')
 
 remote.upload(lib_fname)

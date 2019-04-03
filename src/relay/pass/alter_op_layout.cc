@@ -241,7 +241,6 @@ Expr AlterOpLayoutRewrite(const Call &ref_call,
   std::tie(old_in, old_out, success) = CallInfer(ref_call,
                                                  Array<Layout>(nullptr),
                                                  old_in, input_shapes);
-  LOG(INFO) << old_in << ", " << old_out << ", " << success;
   if (!success) { return Expr(nullptr); }
   CHECK_EQ(old_in.size(), new_in.size());
 

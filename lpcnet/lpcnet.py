@@ -200,11 +200,18 @@ input_vars = [
     gru_b_hidden_state,
 
 ]
+
 inputs = collections.OrderedDict(
-    [(
-        param.name_hint,
-        tvm.ndarray.array(torch.zeros(param.type_annotation.concrete_shape))
-    ) for param in input_vars])
+    [
+        (
+            param.name_hint,
+            tvm.ndarray.array(
+                np.zeros(param.type_annotation.concrete_shape).astype(
+                    param.type_annotation.dtype))
+        )
+        for param in input_vars
+    ]
+)
 
 
 

@@ -293,4 +293,4 @@ with open(
         "wb") as f:
     f.write(relay.save_param_dict(params))
 
-lib.export_library("wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.so".format(**globals()))
+lib.save("wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))

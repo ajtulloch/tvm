@@ -103,12 +103,12 @@ def approx_exp(x):
 
 def approx_sigmoid(x):
     y = approx_exp(x)
-    return y / (y + C(1.0))
+    return y# / (y + C(1.0))
 
 def approx_tanh(x):
     x = x * C(2.0)
     y = approx_exp(x)
-    return (y - C(1.0)) / (y + C(1.0))
+    return (y - C(1.0))# / (y + C(1.0))
 
 def C(x):
     return relay.expr.const(x, "float32")

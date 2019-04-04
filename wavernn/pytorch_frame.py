@@ -198,6 +198,107 @@ def build_wavernn_module(target="llvm"):
     graph, lib, params = relay.build_module.build(func, target=target, params=params)
     return (graph, lib, params)
 
+def build_fast_wavernn_module(target="llvm"):
+    Ifactored = nn.Linear(1, rnn_dims)
+    Ifactored.weight[:, :] = I.weight[:, :1]
+    Ifactored.bias[:] = I.bias[:]
+
+    fc1factored = nn.Linear(rnn_dims, fc_dims)
+    fc1factored.weight[:, :] = fc1.weight[:, :rnn_dims]
+    fc1factored.bias[:] = fc1.bias[:]
+
+    params = {
+        "I_W": tvm.ndarray.array(Ifactored.weight.detach().numpy()),
+        "I_B": tvm.ndarray.array(Ifactored.bias.detach().numpy()),
+        "rnn1_weight_ih": tvm.ndarray.array(rnn1.weight_ih.detach().numpy()),
+        "rnn1_weight_hh": tvm.ndarray.array(rnn1.weight_hh.detach().numpy()),
+        "rnn1_bias_ih": tvm.ndarray.array(rnn1.bias_ih.detach().numpy()),
+        "rnn1_bias_hh": tvm.ndarray.array(rnn1.bias_hh.detach().numpy()),
+        "fc1_W": tvm.ndarray.array(fc1factored.weight.detach().numpy()),
+        "fc1_B": tvm.ndarray.array(fc1factored.bias.detach().numpy()),
+        "fc2_W": tvm.ndarray.array(fc2.weight.detach().numpy()),
+        "fc2_B": tvm.ndarray.array(fc2.bias.detach().numpy()),
+    }
+
+    Rx = relay.var("x", shape=[1, 1], dtype="float32")
+    Rh1 = relay.var("h1", shape=[1, rnn_dims], dtype="float32")
+    RI_residual = relay.var("I_residual", shape=[1, rnn_dims], dtype="float32")
+    Rfc1_residual = relay.var("fc1_residual", shape=[1, fc_dims], dtype="float32")
+    RI_W = relay.var("I_W", shape=(rnn_dims, 1), dtype="float32")
+    RI_B = relay.var("I_B", shape=(rnn_dims,), dtype="float32")
+
+    Cell = collections.namedtuple('Cell', ['weight_ih', 'weight_hh', 'bias_ih', 'bias_hh'])
+
+    def approx_exp(x):
+        x = relay.minimum(relay.maximum(x, C(-88.0)), C(88.0))
+        x = C(127.0) + x * C(1.44268504)
+
+        i = relay.cast(x, "int32")
+        xf = relay.cast(i, "float32")
+        x = x - xf
+        Y = C(0.99992522) + x * (C(0.69583354) + x * (C(0.22606716) + x * C(0.078024523)))
+        exponent = relay.left_shift(i, relay.expr.const(23, "int32"))
+        # exponent = relay.reinterpret(exponent, "float32")
+        # TODO: implement reinterpret
+        exponent = relay.cast(exponent, "float32")
+        return exponent * Y
+
+    def approx_sigmoid(x):
+        y = approx_exp(x)
+        return y / (y + C(1.0))
+
+    def approx_tanh(x):
+        x = x * C(2.0)
+        y = approx_exp(x)
+        return (y - C(1.0)) / (y + C(1.0))
+
+    def C(x):
+        return relay.expr.const(x, "float32")
+
+    def sparse_dense(X, W, B, **kwargs):
+        return relay.nn.bias_add(relay.nn.dense(X, W), B)
+
+    def dense(X, W, B, **kwargs):
+        return relay.nn.bias_add(relay.nn.dense(X, W), B)
+
+    def gru_cell(cell, x, h):
+        xt = sparse_dense(x, cell.weight_ih, cell.bias_ih)
+        ht = sparse_dense(h, cell.weight_hh, cell.bias_hh)
+        xt_gates = relay.split(xt, indices_or_sections=3, axis=1)
+        ht_gates = relay.split(ht, indices_or_sections=3, axis=1)
+        reset_gate = approx_sigmoid(xt_gates[0] + ht_gates[0])
+        input_gate = approx_sigmoid(xt_gates[1] + ht_gates[1])
+        new_gate = approx_tanh(xt_gates[2] + reset_gate * ht_gates[2])
+        return new_gate + input_gate * (h - new_gate)
+
+    xconcat_trns = dense(Rx, RI_W, RI_B) + RI_residual
+
+    Rrnn1 = Cell(
+        weight_ih=relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
+        weight_hh=relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
+        bias_ih=relay.var("rnn1_bias_ih", shape=(3 * rnn_dims, ), dtype="float32"),
+        bias_hh=relay.var("rnn1_bias_hh", shape=(3 * rnn_dims, ), dtype="float32"),
+    )
+    h1 = gru_cell(Rrnn1, xconcat_trns, Rh1)
+    xres = xconcat_trns + h1
+
+    Rfc1_W = relay.var("fc1_W", shape=(fc_dims, rnn_dims), dtype="float32")
+    Rfc1_B = relay.var("fc1_B", shape=(fc_dims,), dtype="float32")
+
+    x_fc = relay.nn.relu(sparse_dense(xres, Rfc1_W, Rfc1_B) + Rfc1_residual)
+
+    Rfc2_W = relay.var("fc2_W", shape=(n_classes, fc_dims), dtype="float32")
+    Rfc2_B = relay.var("fc2_B", shape=(n_classes,), dtype="float32")
+
+    x_prob = relay.nn.softmax(dense(x_fc, Rfc2_W, Rfc2_B))
+
+    outputs = relay.expr.Tuple([x_prob, h1])
+    func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
+    func = relay.ir_pass.infer_type(func)
+    graph, lib, params = relay.build_module.build(func, target=target, params=params)
+    return (graph, lib, params)
+
+
 def factored_relay_frame(a1, a2, m, x_0, h1_0):
     tvm_random_seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
@@ -282,15 +383,15 @@ def test_relay_cpp_frame():
         np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
 
 
-(graph, lib, params) = build_wavernn_module("llvm -mcpu=core-avx2 -target=x86_64-linux-gnu")
+(graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=core-avx2 -target=x86_64-linux-gnu")
 with open(
-        "wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
+        "fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
         "w") as f:
     f.write(graph)
 
 with open(
-        "wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_params.bin".format(**globals()),
+        "fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_params.bin".format(**globals()),
         "wb") as f:
     f.write(relay.save_param_dict(params))
 
-lib.save("wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))
+lib.save("fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))

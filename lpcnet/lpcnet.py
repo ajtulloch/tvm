@@ -17,11 +17,26 @@ import tempfile
 
 import collections
 
+
+BFLOAT16 = False
+DEVICE = 'skl'
+TARGET = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
+# TARGET = tvm.target.rasp()
+PORT = 9198
+TUNE = False
+log_filename = "lpcnet_no_bf16_autotvm_skl.log"
+
+
+GRU_A_STATE_SIZE = 384
+GRU_A_DENSITY = 0.1
+GRU_B_STATE_SIZE = 16
+FEATURE_DENSE2_OUT_SIZE = 128
+
+
+
 BSR = collections.namedtuple(
     'BSR',
     ['data', 'indices', 'indptr', 'N', 'K', 'BS_R', 'BS_C', 'density'])
-
-
 
 def random_bsr_matrix(M, N, BS_R, BS_C, density):
     Y = np.zeros((M, N), dtype="float32")
@@ -41,11 +56,15 @@ def random_bsr_matrix(M, N, BS_R, BS_C, density):
     assert s.indptr.shape == (M // BS_R + 1, )
     return s
 
+def to_bf16(x):
+    assert x.dtype == np.float32
+    return ((x.view('<u4') + 2 ** 15) >> 16).astype("uint16")
+
 def instantiate(param):
     if isinstance(param, BSR):
         param_np = random_bsr_matrix(M=param.N, N=param.K, BS_R=param.BS_R, BS_C=param.BS_C, density=param.density)
         return [
-            (param.data.name_hint, tvm.ndarray.array(param_np.data)),
+            (param.data.name_hint, tvm.ndarray.array(param_np.data.astype("uint16" if BFLOAT16 else "float32"))),
             (param.indices.name_hint, tvm.ndarray.array(param_np.indices.astype("int32"))),
             (param.indptr.name_hint, tvm.ndarray.array(param_np.indptr.astype("int32"))),
         ]
@@ -59,41 +78,44 @@ def instantiate(param):
             )
         ]
 
-def sparse_dense(X, W, B, **kwargs):
-    return relay.nn.bias_add(relay.nn.sparse_dense(X, W), B)
-
 def to_sparse(v, density, BS_R=16, BS_C=1):
     name = v.name_hint
     (N, K) = v.type_annotation.concrete_shape
     nnz = int(density * N * K)
     num_blocks = int(nnz / (BS_R * BS_C)) + 1
-    v_data = relay.var(name + "_data", shape=(num_blocks, BS_R, BS_C), dtype="uint16")
+    v_data = relay.var(name + "_data", shape=(num_blocks, BS_R, BS_C), dtype="uint16" if BFLOAT16 else "float32")
     v_indices = relay.var(name + "_indices", shape=(num_blocks,), dtype="int32")
     v_indptr = relay.var(name + "_indptr", shape=(N // BS_R + 1,), dtype="int32")
     return BSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, BS_R=BS_R, BS_C=BS_C, density=density)
 
 
-def approx_sigmoid(v):
-    x = relay.abs(v)
-    x2 = v * v
-    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
-    e_pos = e / (C(1) + e)
-    e_neg = C(1) / (C(1) + e)
-    # TODO: debug why pass.VectorizeLoop doesn't like select()?
-    return e_pos
-    # return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+def approx_exp(x):
+    x = relay.minimum(relay.maximum(x, C(-88.0)), C(88.0))
+    x = C(127.0) + x * C(1.44268504)
 
-def approx_tanh(v):
-    x = relay.abs(v)
-    x2 = v * v
-    e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
-    return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
+    i = relay.cast(x, "int32")
+    xf = relay.cast(i, "float32")
+    x = x - xf
+    Y = C(0.99992522) + x * (C(0.69583354) + x * (C(0.22606716) + x * C(0.078024523)))
+    exponent = relay.left_shift(i, relay.expr.const(23, "int32"))
+    exponent = relay.reinterpret(exponent, "float32")
+    return exponent * Y
+
+def approx_sigmoid(x):
+    y = approx_exp(x)
+    return y / (y + C(1.0))
+
+def approx_tanh(x):
+    x = x * C(2.0)
+    y = approx_exp(x)
+    return (y - C(1.0)) / (y + C(1.0))
 
 def C(x):
     return relay.expr.const(x, "float32")
 
 def gru(X0, X1, H, W_X0, W_X1, W_H, B_X, B_H, **kwargs):
-    XT = relay.nn.bias_add(relay.nn.dense(X0, W_X0) + relay.nn.dense(X1, W_X1), B_X)
+    XT = relay.nn.bias_add(
+        relay.nn.dense(X0, W_X0) + relay.nn.dense(X1, W_X1), B_X)
     HT = relay.nn.bias_add(relay.nn.dense(H, W_H), B_H)
     XT_gates = relay.split(XT, indices_or_sections=3, axis=1)
     HT_gates = relay.split(HT, indices_or_sections=3, axis=1)
@@ -116,14 +138,10 @@ def sparse_gru(XT, H, W_H, B_H, W_H_DIAG):
 
 
 def dual_fc(x, W, B, A):
+    # W = relay.cast(W, "uint16")
     dual_output = A * approx_tanh(relay.nn.bias_add(relay.nn.dense(x, W), B))
     dual_output_gates = relay.split(dual_output, indices_or_sections=2, axis=1)
     return dual_output_gates[0] + dual_output_gates[1]
-
-GRU_A_STATE_SIZE = 384
-GRU_A_DENSITY = 0.1
-GRU_B_STATE_SIZE = 16
-FEATURE_DENSE2_OUT_SIZE = 128
 
 gru_a_condition = relay.var("gru_a_condition", shape=(1, 3 * GRU_A_STATE_SIZE))
 gru_b_condition = relay.var("gru_b_condition", shape=(1, FEATURE_DENSE2_OUT_SIZE))
@@ -187,6 +205,8 @@ param_vars = [
 params = collections.OrderedDict([(k, v) for param in param_vars for (k, v) in instantiate(param)])
 
 print("Total param size: ", sum(v.asnumpy().nbytes for v in params.values()))
+print("Total param size, no emb: ",
+      sum(v.asnumpy().nbytes for (k, v) in params.items() if "embedding" not in k))
 for k, v in params.items():
     print(k, v.asnumpy().size)
 
@@ -214,32 +234,28 @@ inputs = collections.OrderedDict(
 )
 
 
-
-skl_target = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
-
-log_filename = "lpcnet_autotvm_skl.log"
 def tune():
     global func
     with relay.build_config(opt_level=2):
-        func = relay.optimize(func, target=skl_target, params=params)
+        func = relay.optimize(func, target=TARGET, params=params)
         print(func.astext(show_meta_data=False))
         tasks = autotvm.task.extract_from_program(
-            func, target=skl_target, params=params, ops=(relay.op.nn.dense,))
+            func, target=TARGET, params=params, ops=(relay.op.nn.dense,))
         for i, tsk in enumerate(tasks):
             print(tsk)
             prefix = "[Task %2d/%2d] " % (i + 1, len(tasks))
 
             tuner_obj = autotvm.tuner.XGBTuner(tsk, loss_type='rank', feature_type="knob")
-            n_trial = 1000
+            n_trial = 100
             early_stopping = 200
             measure_option = autotvm.measure_option(
                 builder=autotvm.LocalBuilder(),
                 runner=autotvm.RPCRunner(
-                    'skl',
+                    DEVICE,
                     '0.0.0.0',
-                    9198,
+                    PORT,
                     number=100,
-                    repeat=5,
+                    repeat=3,
                     min_repeat_ms=1000,
                     timeout=100)
             )
@@ -254,35 +270,30 @@ def tune():
                 ]
             )
 
-if 0:
+if TUNE:
     tune()
-    # import sys
-    # sys.exit()
-
 
 with autotvm.apply_history_best(log_filename):
     with relay.build_config(opt_level=3):
-        func = relay.optimize(func, target=skl_target, params=params)
+        func = relay.optimize(func, target=TARGET, params=params)
         print(func.astext(show_meta_data=False))
         func = relay.ir_pass.infer_type(func)
         graph, lib, new_params = relay.build_module.build(
-            func, target=skl_target,  params=params)
+            func, target=TARGET,  params=params)
 
         for (k, v) in params.items():
             print(k, v.shape)
         for (k, v) in new_params.items():
             print(k, v.shape)
-        # with tempfile.NamedTemporaryFile(delete=False, suffix="tvm.json") as f:
-        #     f.write(graph.encode())
-        # netron.start(f.name, host="localhost")
 
 
+lib.save("lpcnet.o")
 tmp = tvm.contrib.util.tempdir()
 lib_fname = tmp.relpath('net.tar')
-with skl_target:
+with TARGET:
     lib.export_library(lib_fname)
-tracker = tvm.rpc.connect_tracker('0.0.0.0', 9198)
-remote = tracker.request('skl')
+tracker = tvm.rpc.connect_tracker('0.0.0.0', PORT)
+remote = tracker.request(DEVICE)
 
 remote.upload(lib_fname)
 rlib = remote.load_module('net.tar')
@@ -292,17 +303,7 @@ r_inputs = {k: tvm.nd.array(v, ctx) for k, v in inputs.items()}
 module = graph_runtime.create(graph, rlib, ctx)
 module.set_input(**r_new_params)
 module.set_input(**r_inputs)
-ftimer = module.module.time_evaluator("run", ctx, 10000)
+ftimer = module.module.time_evaluator("run", ctx, number=100000)
 for i in range(5):
     prof_res = ftimer()
-    print("TVM time: ", prof_res.mean)
-
-module = debug_runtime.create(graph, rlib, ctx)
-module.set_input(**r_new_params)
-module.set_input(**r_inputs)
-module.run()
-module.run()
-module.run()
-module.run()
-module.run()
-module.run()
+    print("TVM time: {:.2f}us".format(prof_res.mean * 10 ** 6))

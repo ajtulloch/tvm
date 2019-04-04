@@ -278,6 +278,8 @@ def get_last_ffi_error():
     """
     c_err_msg = py_str(_LIB.TVMGetLastError())
     py_err_msg, err_type = c2pyerror(c_err_msg)
+    print(c_err_msg, py_err_msg, err_type)
+
     if err_type.startswith("tvm.error."):
         err_type = err_type[10:]
     return ERROR_TYPE.get(err_type, TVMError)(py_err_msg)

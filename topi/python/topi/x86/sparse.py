@@ -35,6 +35,7 @@ def schedule_sparse_dense(outs):
                 s[outs[0].op].unroll(yo)
                 s[outs[0].op].vectorize(yi)
             else:
+                # pass
                 # s[Y_reshape].parallel(noo)
                 s[Y_reshape].unroll(noo)
 

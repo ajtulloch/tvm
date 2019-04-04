@@ -37,6 +37,9 @@ void CodeGenLLVM::Init(const std::string& module_name,
   InitializeLLVM();
   ctx_ = ctx;
   builder_.reset(new IRBuilder(*ctx_));
+  llvm::FastMathFlags FMF;
+  FMF.setFast();
+  builder_->setFastMathFlags(FMF);
   module_.reset(new llvm::Module(module_name, *ctx_));
   md_builder_.reset(new llvm::MDBuilder(*ctx_));
   // types

@@ -164,6 +164,17 @@ inline Tensor cast(const Tensor& x,
   }, name, tag);
 }
 
+inline Tensor reinterpret(const Tensor& x, Type type, std::string name = "tensor",
+                          std::string tag = kElementWise) {
+  return compute(x->shape,
+                 [&](const Array<Var>& i) {
+                   // vec_a = tvm.call_pure_intrin('int8x64', 'reinterpret', vec_ai32)
+                   return tvm::ir::Call::make(type, "reinterpret", {x(i)},
+                                              tvm::ir::Call::PureIntrinsic);
+                 },
+                 name, tag);
+}
+
 /*!
 * \brief Creates an operation that sum each element of a tensor
 *

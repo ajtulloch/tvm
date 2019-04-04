@@ -19,10 +19,10 @@ import collections
 
 
 BFLOAT16 = False
-DEVICE = 'skl'
-TARGET = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
-# TARGET = tvm.target.rasp()
-PORT = 9198
+DEVICE = 'rpi'
+# TARGET = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
+TARGET = tvm.target.rasp()
+PORT = 9195
 TUNE = False
 log_filename = "lpcnet_no_bf16_autotvm_skl.log"
 

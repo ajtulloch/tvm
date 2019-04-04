@@ -21,7 +21,10 @@ from tvm import relay
 
 cli = click.Group()
 
-skl_target = tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu')
+TARGETS = {
+    "skl": (tvm.target.create('llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu'), 9198),
+    "rpi": (tvm.target.rasp(), 9195),
+}
 
 feat_dims = 24
 aux_dims = 32
@@ -81,11 +84,12 @@ def instantiate(param):
         )]
 
 
-def tune(func, params, log_name):
+def tune(func, params, log_name, device):
+    (target, port) = TARGETS[device]
     with relay.build_config(opt_level=2):
-        func = relay.optimize(func, target=skl_target, params=params)
+        func = relay.optimize(func, target=target, params=params)
         tasks = autotvm.task.extract_from_program(
-            func, target=skl_target, params=params, ops=(relay.op.nn.dense,))
+            func, target=target, params=params, ops=(relay.op.nn.dense,))
         for i, tsk in enumerate(tasks):
             prefix = "[Task %2d/%2d] " % (i + 1, len(tasks))
 
@@ -95,9 +99,9 @@ def tune(func, params, log_name):
             measure_option = autotvm.measure_option(
                 builder=autotvm.LocalBuilder(),
                 runner=autotvm.RPCRunner(
-                    'skl',
+                    device,
                     '0.0.0.0',
-                    9195,
+                    port,
                     number=100,
                     repeat=5,
                     min_repeat_ms=1000,
@@ -119,8 +123,9 @@ def tune(func, params, log_name):
 @click.option('--fc-dims', type=int, required=True)
 @click.option('--density', type=float, required=True)
 @click.option('--fc-density', type=float, required=True)
+@click.option('--device', type=click.Choice(["rpi", "skl"]), required=True)
 @click.option('--fc-bf16', type=int, required=True)
-def run(rnn_dims, fc_dims, density, fc_density, fc_bf16):
+def run(rnn_dims, fc_dims, density, fc_density, fc_bf16, device):
     logging.basicConfig(level=logging.DEBUG)
 
     x = relay.var("x", shape=[1, rnn_dims], dtype="float32")
@@ -142,19 +147,40 @@ def run(rnn_dims, fc_dims, density, fc_density, fc_bf16):
         v_indptr = relay.var(name + "_indptr", shape=(N // BS_R + 1,), dtype="int32")
         return BSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, BS_R=BS_R, BS_C=BS_C, density=density)
 
-    def approx_sigmoid(v):
-        x = relay.abs(v)
-        x2 = v * v
-        e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
-        e_pos = e / (C(1) + e)
-        e_neg = C(1) / (C(1) + e)
-        return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+    def approx_exp(x):
+        x = relay.minimum(relay.maximum(x, C(-88.0)), C(88.0))
+        x = C(127.0) + x * C(1.44268504)
 
-    def approx_tanh(v):
-        x = relay.abs(v)
-        x2 = v * v
-        e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
-        return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
+        i = relay.cast(x, "int32")
+        xf = relay.cast(i, "float32")
+        x = x - xf
+        Y = C(0.99992522) + x * (C(0.69583354) + x * (C(0.22606716) + x * C(0.078024523)))
+        exponent = relay.left_shift(i, relay.expr.const(23, "int32"))
+        exponent = relay.reinterpret(exponent, "float32")
+        return exponent * Y
+
+    def approx_sigmoid(x):
+        y = approx_exp(x)
+        return y / (y + C(1.0))
+
+    def approx_tanh(x):
+        x = x * C(2.0)
+        y = approx_exp(x)
+        return (y - C(1.0)) / (y + C(1.0))
+
+    # def approx_sigmoid(v):
+    #     x = relay.abs(v)
+    #     x2 = v * v
+    #     e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
+    #     e_pos = e / (C(1) + e)
+    #     e_neg = C(1) / (C(1) + e)
+    #     return relay.where(relay.greater_equal(v, C(0.0)), e_pos, e_neg)
+
+    # def approx_tanh(v):
+    #     x = relay.abs(v)
+    #     x2 = v * v
+    #     e = C(1.0) + x + x2 * C(0.5658) + C(0.143) * x2 * x2
+    #     return relay.sign(v) * (e - C(1) / e) / (e + C(1) / e)
 
     def C(x):
         return relay.expr.const(x, "float32")
@@ -214,21 +240,22 @@ def run(rnn_dims, fc_dims, density, fc_density, fc_bf16):
         ) for param in input_vars])
 
     log_name = tempfile.NamedTemporaryFile(delete=False, suffix=".tvm.log").name
-    tune(func, params, log_name)
+    tune(func, params, log_name, device)
 
+    (target, port) = TARGETS[device]
     with autotvm.apply_history_best(log_name):
         with relay.build_config(opt_level=3):
-            func = relay.optimize(func, target=skl_target, params=params)
+            func = relay.optimize(func, target=target, params=params)
             func = relay.ir_pass.infer_type(func)
             graph, lib, new_params = relay.build_module.build(
-                func, target=skl_target,  params=params)
+                func, target=target,  params=params)
 
     tmp = tvm.contrib.util.tempdir()
     lib_fname = tmp.relpath('net.tar')
-    with skl_target:
+    with target:
         lib.export_library(lib_fname)
-    tracker = tvm.rpc.connect_tracker('0.0.0.0', 9195)
-    remote = tracker.request('skl')
+    tracker = tvm.rpc.connect_tracker('0.0.0.0', port)
+    remote = tracker.request(device)
 
     remote.upload(lib_fname)
     rlib = remote.load_module('net.tar')

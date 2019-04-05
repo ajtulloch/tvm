@@ -216,7 +216,6 @@ def build_fast_wavernn_module(target="llvm"):
         "rnn1_weight_hh": tvm.ndarray.array(rnn1.weight_hh.detach().numpy()),
         "rnn1_bias_ih": tvm.ndarray.array(rnn1.bias_ih.detach().numpy()),
         "rnn1_bias_hh": tvm.ndarray.array(rnn1.bias_hh.detach().numpy()),
-        "fc1_W": tvm.ndarray.array(fc1factored.weight.detach().numpy()),
         "fc1_B": tvm.ndarray.array(fc1factored.bias.detach().numpy()),
         "fc2_W": tvm.ndarray.array(fc2.weight.detach().numpy()),
         "fc2_B": tvm.ndarray.array(fc2.bias.detach().numpy()),
@@ -235,7 +234,7 @@ def build_fast_wavernn_module(target="llvm"):
 
     BSR = collections.namedtuple(
         'BSR',
-        ['data', 'indices', 'indptr', 'N', 'K', 'BS_R', 'BS_C', 'density'])
+        ['data', 'indices', 'indptr',])
 
     def approx_exp(x):
         x = relay.minimum(relay.maximum(x, C(-88.0)), C(88.0))
@@ -267,8 +266,8 @@ def build_fast_wavernn_module(target="llvm"):
         return relay.nn.bias_add(relay.nn.dense(X, W), B)
 
     def gru_cell(cell, x, h):
-        xt = dense(x, cell.weight_ih, cell.bias_ih)
-        ht = dense(h, cell.weight_hh, cell.bias_hh)
+        xt = sparse_dense(x, cell.weight_ih, cell.bias_ih)
+        ht = sparse_dense(h, cell.weight_hh, cell.bias_hh)
         xt_gates = relay.split(xt, indices_or_sections=3, axis=1)
         ht_gates = relay.split(ht, indices_or_sections=3, axis=1)
         reset_gate = approx_sigmoid(xt_gates[0] + ht_gates[0])
@@ -276,23 +275,34 @@ def build_fast_wavernn_module(target="llvm"):
         new_gate = approx_tanh(xt_gates[2] + reset_gate * ht_gates[2])
         return new_gate + input_gate * (h - new_gate)
 
+    def to_sparse(v, arr, BS_R=16, BS_C=1):
+        name = v.name_hint
+        (N, K) = v.type_annotation.concrete_shape
+        assert (N, K) == arr.shape
+        sp_arr = sp.bsr_matrix(arr, blocksize=(BS_R, BS_C))
+        v_data = relay.var(name + "_data", shape=sp_arr.data.shape, dtype="float32")
+        v_indices = relay.var(name + "_indices", shape=sp_arr.indices.shape, dtype="int32")
+        v_indptr = relay.var(name + "_indptr", shape=sp_arr.indptr.shape, dtype="int32")
+        params[name + "_data"] = tvm.ndarray.array(sp_arr.data)
+        params[name + "_indices"] = tvm.ndarray.array(sp_arr.indices)
+        params[name + "_indptr"] = tvm.ndarray.array(sp_arr.indptr)
+        return BSR(data=v_data, indices=v_indices, indptr=v_indptr)
+
     xconcat_trns = dense(Rx, RI_W, RI_B) + RI_residual
 
     Rrnn1 = Cell(
-        # weight_ih=to_sparse(relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), params),
-        # weight_hh=to_sparse(relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), params),
-        weight_ih=relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
-        weight_hh=relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
+        weight_ih=to_sparse(relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), rnn1.weight_ih.detach().numpy()),
+        weight_hh=to_sparse(relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), rnn1.weight_hh.detach().numpy()),
         bias_ih=relay.var("rnn1_bias_ih", shape=(3 * rnn_dims, ), dtype="float32"),
         bias_hh=relay.var("rnn1_bias_hh", shape=(3 * rnn_dims, ), dtype="float32"),
     )
     h1 = gru_cell(Rrnn1, xconcat_trns, Rh1)
     xres = xconcat_trns + h1
 
-    Rfc1_W = relay.var("fc1_W", shape=(fc_dims, rnn_dims), dtype="float32")
+    Rfc1_W = to_sparse(relay.var("fc1_W", shape=(fc_dims, rnn_dims), dtype="float32"), fc1factored.weight.detach().numpy())
     Rfc1_B = relay.var("fc1_B", shape=(fc_dims,), dtype="float32")
 
-    x_fc = relay.nn.relu(dense(xres, Rfc1_W, Rfc1_B) + Rfc1_residual)
+    x_fc = relay.nn.relu(sparse_dense(xres, Rfc1_W, Rfc1_B) + Rfc1_residual)
 
     Rfc2_W = relay.var("fc2_W", shape=(n_classes, fc_dims), dtype="float32")
     Rfc2_B = relay.var("fc2_B", shape=(n_classes,), dtype="float32")

@@ -32,12 +32,11 @@ def schedule_sparse_dense(outs):
                 (yo, yi) = s[outs[0].op].split(s[outs[0].op].op.axis[1], 32)
                 s[Y_reshape].compute_at(s[outs[0]], yo)
                 # s[outs[0].op].parallel(yo)
-                # s[outs[0].op].unroll(yo)
+                s[outs[0].op].unroll(yo)
                 s[outs[0].op].vectorize(yi)
             else:
-                pass
                 # s[Y_reshape].parallel(noo)
-                # s[Y_reshape].unroll(noo)
+                s[Y_reshape].unroll(noo)
 
     traverse_inline(s, outs[0].op, callback)
     return s

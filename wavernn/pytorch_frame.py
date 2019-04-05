@@ -229,7 +229,7 @@ def build_wavernn_module(target="llvm"):
     graph, lib, params = relay.build_module.build(func, target=target, params=params)
     return (graph, lib, params)
 
-def build_fast_wavernn_module(target="llvm"):
+def build_fast_wavernn_module(target="llvm", bfloat16=False, tune=False, profile=False):
     Ifactored = nn.Linear(1, rnn_dims)
     Ifactored.weight[:, :] = I.weight[:, :1]
     Ifactored.bias[:] = I.bias[:]
@@ -258,8 +258,6 @@ def build_fast_wavernn_module(target="llvm"):
     RI_B = relay.var("I_B", shape=(rnn_dims,), dtype="float32")
 
     Cell = collections.namedtuple('Cell', ['weight_ih', 'weight_hh', 'bias_ih', 'bias_hh'])
-
-    BFLOAT16 = False
 
     BSR = collections.namedtuple(
         'BSR',
@@ -304,16 +302,20 @@ def build_fast_wavernn_module(target="llvm"):
         new_gate = approx_tanh(xt_gates[2] + reset_gate * ht_gates[2])
         return new_gate + input_gate * (h - new_gate)
 
+    def to_bf16(x):
+        assert x.dtype == np.float32
+        return ((x.view('<u4') + 2 ** 15) >> 16).astype("uint16")
+
     def to_sparse(v, arr, BS_R=16, BS_C=1):
         name = v.name_hint
         (N, K) = v.type_annotation.concrete_shape
         assert (N, K) == arr.shape
         sp_arr = sp.bsr_matrix(arr, blocksize=(BS_R, BS_C))
         print("Sparsity achieved: {:.2f}%".format((1.0 - float(sp_arr.data.size) / arr.size) * 100))
-        v_data = relay.var(name + "_data", shape=sp_arr.data.shape, dtype="float32")
+        v_data = relay.var(name + "_data", shape=sp_arr.data.shape, dtype="float32" if not bfloat16 else "uint16")
         v_indices = relay.var(name + "_indices", shape=sp_arr.indices.shape, dtype="int32")
         v_indptr = relay.var(name + "_indptr", shape=sp_arr.indptr.shape, dtype="int32")
-        params[name + "_data"] = tvm.ndarray.array(sp_arr.data)
+        params[name + "_data"] = tvm.ndarray.array(sp_arr.data) if not bfloat16 else tvm.ndarray.array(to_bf16(sp_arr.data))
         params[name + "_indices"] = tvm.ndarray.array(sp_arr.indices)
         params[name + "_indptr"] = tvm.ndarray.array(sp_arr.indptr)
         return BSR(data=v_data, indices=v_indices, indptr=v_indptr)
@@ -344,8 +346,44 @@ def build_fast_wavernn_module(target="llvm"):
     outputs = relay.expr.Tuple([x_prob, h1])
     func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
     func = relay.ir_pass.infer_type(func)
+    print(func.astext())
     TARGET = tvm.target.create(target)
     log_filename = "lpcnet_no_bf16_autotvm_skl.log"
+
+    if tune:
+        with relay.build_config(opt_level=2):
+            func = relay.optimize(func, target=TARGET, params=params)
+            print(func.astext(show_meta_data=False))
+            tasks = autotvm.task.extract_from_program(
+                func, target=TARGET, params=params, ops=(relay.op.nn.dense,))
+            for i, tsk in enumerate(tasks):
+                print(tsk)
+                prefix = "[Task %2d/%2d] " % (i + 1, len(tasks))
+
+                tuner_obj = autotvm.tuner.XGBTuner(tsk, loss_type='rank', feature_type="knob")
+                n_trial = 100
+                early_stopping = 200
+                measure_option = autotvm.measure_option(
+                    builder=autotvm.LocalBuilder(),
+                    runner=autotvm.RPCRunner(
+                        'skl',
+                        '0.0.0.0',
+                        9198,
+                        number=100,
+                        repeat=3,
+                        min_repeat_ms=1000,
+                        timeout=100)
+                )
+
+                tuner_obj.tune(
+                    n_trial=min(n_trial, len(tsk.config_space)),
+                    early_stopping=early_stopping,
+                    measure_option=measure_option,
+                    callbacks=[
+                        autotvm.callback.progress_bar(n_trial, prefix=prefix),
+                        autotvm.callback.log_to_file(log_filename)
+                    ]
+                )
 
     with autotvm.apply_history_best(log_filename):
         with relay.build_config(opt_level=3):
@@ -353,6 +391,36 @@ def build_fast_wavernn_module(target="llvm"):
             func = relay.ir_pass.infer_type(func)
             graph, lib, new_params = relay.build_module.build(
                 func, target=TARGET,  params=params)
+
+        # profile
+        tmp = tvm.contrib.util.tempdir()
+        lib_fname = tmp.relpath('net.tar')
+        with TARGET:
+            lib.export_library(lib_fname)
+        tracker = tvm.rpc.connect_tracker('0.0.0.0', 9198)
+        remote = tracker.request('skl')
+
+    if profile:
+        remote.upload(lib_fname)
+        rlib = remote.load_module('net.tar')
+        ctx = remote.cpu(0)
+        r_new_params = {k: tvm.nd.array(v, ctx) for k, v in new_params.items()}
+        inputs = {
+            "x": tvm.nd.array(np.random.randn(1, 1).astype(np.float32)),
+            "h1": tvm.nd.array(np.random.randn(1, rnn_dims).astype(np.float32)),
+            "I_residual": tvm.nd.array(np.random.randn(1, rnn_dims).astype(np.float32)),
+            "fc1_residual": tvm.nd.array(np.random.randn(1, rnn_dims).astype(np.float32)),
+        }
+        r_new_params = {k: tvm.nd.array(v, ctx) for k, v in new_params.items()}
+        r_inputs = {k: tvm.nd.array(v, ctx) for k, v in inputs.items()}
+        module = tvm.contrib.graph_runtime.create(graph, rlib, ctx)
+        module.set_input(**r_new_params)
+        module.set_input(**r_inputs)
+        ftimer = module.module.time_evaluator("run", ctx, number=100000)
+        for i in range(5):
+            prof_res = ftimer()
+            print("TVM time: {:.2f}us".format(prof_res.mean * 10 ** 6))
+
     return (graph, lib, new_params)
 
 
@@ -422,7 +490,7 @@ def factored_relay_cpp_frame_fast(a1, a2, m, x_0, h1_0):
     tvm_random_seed(10)
     (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
     T = a1.shape[1]
-    (graph, lib, params) = build_fast_wavernn_module()
+    (graph, lib, params) = build_fast_wavernn_module(profile=False)
     import tempfile
     with tempfile.NamedTemporaryFile(delete=False, prefix="tvm_model_lib", suffix=".so") as lib_f:
         lib.export_library(lib_f.name)
@@ -483,17 +551,35 @@ def test_relay_cpp_frame_fast():
         print(outs_ref, outs_new)
         np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
 
+def skylake():
+    (graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu", bfloat16=True)
+    with open(
+            "skl_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
+            "w") as f:
+        f.write(graph)
 
-(graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu")
-with open(
-        "fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
-        "w") as f:
-    f.write(graph)
+    with open(
+            "skl_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_params.bin".format(**globals()),
+            "wb") as f:
+        f.write(relay.save_param_dict(params))
 
-with open(
-        "fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_params.bin".format(**globals()),
-        "wb") as f:
-    f.write(relay.save_param_dict(params))
+    lib.save("skl_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))
 
-lib.save("fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))
-lib.export_library("fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.so".format(**globals()))
+def haswell():
+    (graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=core-avx2 -target=x86_64-linux-gnu", bfloat16=True)
+    with open(
+            "hsw_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
+            "w") as f:
+        f.write(graph)
+
+    with open(
+            "hsw_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_params.bin".format(**globals()),
+            "wb") as f:
+        f.write(relay.save_param_dict(params))
+
+    lib.save("hsw_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))
+
+# skylake()
+# haswell()
+
+

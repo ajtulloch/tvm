@@ -53,12 +53,11 @@ fc1 = nn.Linear(rnn_dims + aux_dims, fc_dims)
 fc2 = nn.Linear(fc_dims, n_classes)
 
 
-rnn1.weight_ih[:, :] = torch.tensor(sparsify(rnn1.weight_ih.detach().numpy(), BS_R=16, BS_C=1, density=0.05))
-rnn1.weight_hh[:, :] = torch.tensor(sparsify(rnn1.weight_hh.detach().numpy(), BS_R=16, BS_C=1, density=0.05))
+rnn1.weight_ih[:, :] = torch.tensor(sparsify(rnn1.weight_ih.detach().numpy(), BS_R=16, BS_C=1, density=0.04))
+rnn1.weight_hh[:, :] = torch.tensor(sparsify(rnn1.weight_hh.detach().numpy(), BS_R=16, BS_C=1, density=0.04))
+fc1.weight[:, :rnn_dims] = torch.tensor(sparsify(fc1.weight[:, :rnn_dims].detach().numpy(), BS_R=16, BS_C=1, density=0.04))
+fc2.weight[:, :] = torch.tensor(sparsify(fc2.weight.detach().numpy(), BS_R=16, BS_C=1, density=0.1))
 
-fc2.weight[:, :] = torch.tensor(sparsify(fc2.weight.detach().numpy(), BS_R=16, BS_C=1, density=0.2))
-
-fc1.weight[:, :rnn_dims] = torch.tensor(sparsify(fc1.weight[:, :rnn_dims].detach().numpy(), BS_R=16, BS_C=1, density=0.05))
 
 def tvm_random_seed(seed):
     tvm.get_global_func("tvm.contrib.wavernn.set_seed")(seed)
@@ -241,12 +240,9 @@ def build_fast_wavernn_module(target="llvm", bfloat16=False, tune=False, profile
     params = {
         "I_W": tvm.ndarray.array(Ifactored.weight.detach().numpy()),
         "I_B": tvm.ndarray.array(Ifactored.bias.detach().numpy()),
-        "rnn1_weight_ih": tvm.ndarray.array(rnn1.weight_ih.detach().numpy()),
-        "rnn1_weight_hh": tvm.ndarray.array(rnn1.weight_hh.detach().numpy()),
         "rnn1_bias_ih": tvm.ndarray.array(rnn1.bias_ih.detach().numpy()),
         "rnn1_bias_hh": tvm.ndarray.array(rnn1.bias_hh.detach().numpy()),
         "fc1_B": tvm.ndarray.array(fc1factored.bias.detach().numpy()),
-        "fc2_W": tvm.ndarray.array(fc2.weight.detach().numpy()),
         "fc2_B": tvm.ndarray.array(fc2.bias.detach().numpy()),
     }
 
@@ -552,7 +548,7 @@ def test_relay_cpp_frame_fast():
         np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
 
 def skylake():
-    (graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu", bfloat16=True)
+    (graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu", bfloat16=True, profile=True)
     with open(
             "skl_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
             "w") as f:
@@ -579,7 +575,5 @@ def haswell():
 
     lib.save("hsw_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))
 
-# skylake()
+skylake()
 # haswell()
-
-

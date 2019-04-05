@@ -304,10 +304,11 @@ def build_fast_wavernn_module(target="llvm"):
 
     x_fc = relay.nn.relu(sparse_dense(xres, Rfc1_W, Rfc1_B) + Rfc1_residual)
 
-    Rfc2_W = relay.var("fc2_W", shape=(n_classes, fc_dims), dtype="float32")
+    Rfc2_W = to_sparse(relay.var("fc2_W", shape=(n_classes, fc_dims), dtype="float32"), fc2.weight.detach().numpy())
     Rfc2_B = relay.var("fc2_B", shape=(n_classes,), dtype="float32")
 
-    x_prob_unnorm = approx_exp(dense(x_fc, Rfc2_W, Rfc2_B))
+    x_prob_unnorm = approx_exp(sparse_dense(x_fc, Rfc2_W, Rfc2_B))
+
     x_prob_sum = relay.sum(x_prob_unnorm, axis=-1)
     x_prob = x_prob_unnorm / x_prob_sum
     outputs = relay.expr.Tuple([x_prob, h1])

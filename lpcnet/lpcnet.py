@@ -108,7 +108,8 @@ def approx_sigmoid(x):
 def approx_tanh(x):
     x = x * C(2.0)
     y = approx_exp(x)
-    return (y - C(1.0))# / (y + C(1.0))
+    return y
+    # return (y - C(1.0)) / (y + C(1.0))
 
 def C(x):
     return relay.expr.const(x, "float32")
@@ -185,7 +186,7 @@ dual_fc_W = relay.var("dual_fc_W", shape=(512, 16))
 dual_fc_B = relay.var("dual_fc_B", shape=(512, ))
 dual_fc_A = relay.var("dual_fc_A", shape=(512, ))
 
-approx_softmax = approx_sigmoid
+approx_softmax = approx_exp
 output = approx_softmax(dual_fc(gru_b_next_hidden_state, dual_fc_W, dual_fc_B, dual_fc_A))
 
 

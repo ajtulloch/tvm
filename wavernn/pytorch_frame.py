@@ -1,3 +1,6 @@
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
 import torch
 from torch import nn
 import torch.nn.functional as F
@@ -10,6 +13,24 @@ import itertools
 import scipy.sparse as sp
 torch.manual_seed(42)
 
+
+def sparsify(arr, BS_R, BS_C, density):
+    (M, N) = arr.shape
+    Y = np.zeros((M, N), dtype="float32")
+    assert M % BS_R == 0
+    assert N % BS_C == 0
+    nnz = int(density * M * N)
+    num_blocks = int(nnz / (BS_R * BS_C)) + 1
+    candidate_blocks = np.asarray(
+        list(itertools.product(range(0, M, BS_R),
+                               range(0, N, BS_C))))
+    assert candidate_blocks.shape[0] == M // BS_R * N // BS_C
+    chosen_blocks = candidate_blocks[
+        np.random.choice(candidate_blocks.shape[0], size=num_blocks, replace=False)]
+    for i in range(len(chosen_blocks)):
+        r, c = chosen_blocks[i]
+        Y[r:r + BS_R, c:c + BS_C] = arr[r:r + BS_R, c:c + BS_C]
+    return Y
 
 rnn_dims = 1024
 fc_dims = 1024
@@ -30,6 +51,14 @@ I = nn.Linear(feat_dims + aux_dims + 1, rnn_dims)
 rnn1 = nn.GRUCell(rnn_dims, rnn_dims)
 fc1 = nn.Linear(rnn_dims + aux_dims, fc_dims)
 fc2 = nn.Linear(fc_dims, n_classes)
+
+
+rnn1.weight_ih[:, :] = torch.tensor(sparsify(rnn1.weight_ih.detach().numpy(), BS_R=16, BS_C=1, density=0.05))
+rnn1.weight_hh[:, :] = torch.tensor(sparsify(rnn1.weight_hh.detach().numpy(), BS_R=16, BS_C=1, density=0.05))
+
+fc2.weight[:, :] = torch.tensor(sparsify(fc2.weight.detach().numpy(), BS_R=16, BS_C=1, density=0.2))
+
+fc1.weight[:, :rnn_dims] = torch.tensor(sparsify(fc1.weight[:, :rnn_dims].detach().numpy(), BS_R=16, BS_C=1, density=0.05))
 
 def tvm_random_seed(seed):
     tvm.get_global_func("tvm.contrib.wavernn.set_seed")(seed)
@@ -280,6 +309,7 @@ def build_fast_wavernn_module(target="llvm"):
         (N, K) = v.type_annotation.concrete_shape
         assert (N, K) == arr.shape
         sp_arr = sp.bsr_matrix(arr, blocksize=(BS_R, BS_C))
+        print("Sparsity achieved: {:.2f}%".format((1.0 - float(sp_arr.data.size) / arr.size) * 100))
         v_data = relay.var(name + "_data", shape=sp_arr.data.shape, dtype="float32")
         v_indices = relay.var(name + "_indices", shape=sp_arr.indices.shape, dtype="int32")
         v_indptr = relay.var(name + "_indptr", shape=sp_arr.indptr.shape, dtype="int32")
@@ -320,7 +350,6 @@ def build_fast_wavernn_module(target="llvm"):
     with autotvm.apply_history_best(log_filename):
         with relay.build_config(opt_level=3):
             func = relay.optimize(func, target=TARGET, params=params)
-            print(func.astext(show_meta_data=False))
             func = relay.ir_pass.infer_type(func)
             graph, lib, new_params = relay.build_module.build(
                 func, target=TARGET,  params=params)

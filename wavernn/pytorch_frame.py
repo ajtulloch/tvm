@@ -231,78 +231,21 @@ def build_fast_wavernn_module(target="llvm"):
 
     Cell = collections.namedtuple('Cell', ['weight_ih', 'weight_hh', 'bias_ih', 'bias_hh'])
 
-    BFLOAT16 = True
+    BFLOAT16 = False
 
     BSR = collections.namedtuple(
         'BSR',
         ['data', 'indices', 'indptr', 'N', 'K', 'BS_R', 'BS_C', 'density'])
 
-    def random_bsr_matrix(M, N, BS_R, BS_C, density):
-        Y = np.zeros((M, N), dtype="float32")
-        assert M % BS_R == 0
-        assert N % BS_C == 0
-        nnz = int(density * M * N)
-        num_blocks = int(nnz / (BS_R * BS_C)) + 1
-        candidate_blocks = np.asarray(list(itertools.product(range(0, M, BS_R), range(0, N, BS_C))))
-        assert candidate_blocks.shape[0] == M // BS_R * N // BS_C
-        chosen_blocks = candidate_blocks[np.random.choice(candidate_blocks.shape[0], size=num_blocks, replace=False)]
-        for i in range(len(chosen_blocks)):
-            r, c = chosen_blocks[i]
-            Y[r:r + BS_R, c:c + BS_C] = np.random.randn(BS_R, BS_C).astype("float32")
-        s = sp.bsr_matrix(Y, blocksize=(BS_R, BS_C))
-        assert s.data.shape == (num_blocks, BS_R, BS_C)
-        assert s.indices.shape == (num_blocks, )
-        assert s.indptr.shape == (M // BS_R + 1, )
-        return s
-
-    def to_bf16(x):
-        assert x.dtype == np.float32
-        return ((x.view('<u4') + 2 ** 15) >> 16).astype("uint16")
-
-    def instantiate(param):
-        if isinstance(param, BSR):
-            param_np = random_bsr_matrix(M=param.N, N=param.K, BS_R=param.BS_R, BS_C=param.BS_C, density=param.density)
-            return [
-                (param.data.name_hint, tvm.ndarray.array(param_np.data.astype("uint16" if BFLOAT16 else "float32"))),
-                (param.indices.name_hint, tvm.ndarray.array(param_np.indices.astype("int32"))),
-                (param.indptr.name_hint, tvm.ndarray.array(param_np.indptr.astype("int32"))),
-            ]
-        else:
-            return [(
-                param.name_hint,
-                tvm.ndarray.array(
-                    np.random.randn(*param.type_annotation.concrete_shape).astype(
-                        param.type_annotation.dtype)
-                )
-                )
-            ]
-
-    def to_sparse(v, params, density=0.05, BS_R=16, BS_C=1):
-        name = v.name_hint
-        (N, K) = v.type_annotation.concrete_shape
-        nnz = int(density * N * K)
-        num_blocks = int(nnz / (BS_R * BS_C)) + 1
-        v_data = relay.var(name + "_data", shape=(num_blocks, BS_R, BS_C), dtype="uint16" if BFLOAT16 else "float32")
-        v_indices = relay.var(name + "_indices", shape=(num_blocks,), dtype="int32")
-        v_indptr = relay.var(name + "_indptr", shape=(N // BS_R + 1,), dtype="int32")
-        param_np = random_bsr_matrix(M=N, N=K, BS_R=BS_R, BS_C=BS_C, density=density)
-        params[name + "_data"] = to_bf16(param_np.data) if BFLOAT16 else param_np.data
-        params[name + "_indices"] = param_np.indices.astype("int32")
-        params[name + "_indptr"] = param_np.indptr.astype("int32")
-        return BSR(data=v_data, indices=v_indices, indptr=v_indptr, N=N, K=K, BS_R=BS_R, BS_C=BS_C, density=density)
-
     def approx_exp(x):
         x = relay.minimum(relay.maximum(x, C(-88.0)), C(88.0))
-        x = C(127.0) + x * C(1.44268504)
-
-        i = relay.cast(x, "int32")
-        xf = relay.cast(i, "float32")
+        x = C(127.0) + x * C(1.44269504)
+        xf = relay.floor(x)
+        i = relay.cast(xf, "int32")
         x = x - xf
         Y = C(0.99992522) + x * (C(0.69583354) + x * (C(0.22606716) + x * C(0.078024523)))
         exponent = relay.left_shift(i, relay.expr.const(23, "int32"))
-        # exponent = relay.reinterpret(exponent, "float32")
-        # TODO: implement reinterpret
-        exponent = relay.cast(exponent, "float32")
+        exponent = relay.reinterpret(exponent, "float32")
         return exponent * Y
 
     def approx_sigmoid(x):
@@ -324,8 +267,8 @@ def build_fast_wavernn_module(target="llvm"):
         return relay.nn.bias_add(relay.nn.dense(X, W), B)
 
     def gru_cell(cell, x, h):
-        xt = sparse_dense(x, cell.weight_ih, cell.bias_ih)
-        ht = sparse_dense(h, cell.weight_hh, cell.bias_hh)
+        xt = dense(x, cell.weight_ih, cell.bias_ih)
+        ht = dense(h, cell.weight_hh, cell.bias_hh)
         xt_gates = relay.split(xt, indices_or_sections=3, axis=1)
         ht_gates = relay.split(ht, indices_or_sections=3, axis=1)
         reset_gate = approx_sigmoid(xt_gates[0] + ht_gates[0])
@@ -336,24 +279,27 @@ def build_fast_wavernn_module(target="llvm"):
     xconcat_trns = dense(Rx, RI_W, RI_B) + RI_residual
 
     Rrnn1 = Cell(
-        weight_ih=to_sparse(relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), params),
-        weight_hh=to_sparse(relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), params),
+        # weight_ih=to_sparse(relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), params),
+        # weight_hh=to_sparse(relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"), params),
+        weight_ih=relay.var("rnn1_weight_ih", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
+        weight_hh=relay.var("rnn1_weight_hh", shape=(3 * rnn_dims, rnn_dims), dtype="float32"),
         bias_ih=relay.var("rnn1_bias_ih", shape=(3 * rnn_dims, ), dtype="float32"),
         bias_hh=relay.var("rnn1_bias_hh", shape=(3 * rnn_dims, ), dtype="float32"),
     )
     h1 = gru_cell(Rrnn1, xconcat_trns, Rh1)
     xres = xconcat_trns + h1
 
-    Rfc1_W = to_sparse(relay.var("fc1_W", shape=(fc_dims, rnn_dims), dtype="float32"), params)
+    Rfc1_W = relay.var("fc1_W", shape=(fc_dims, rnn_dims), dtype="float32")
     Rfc1_B = relay.var("fc1_B", shape=(fc_dims,), dtype="float32")
 
-    x_fc = relay.nn.relu(sparse_dense(xres, Rfc1_W, Rfc1_B) + Rfc1_residual)
+    x_fc = relay.nn.relu(dense(xres, Rfc1_W, Rfc1_B) + Rfc1_residual)
 
     Rfc2_W = relay.var("fc2_W", shape=(n_classes, fc_dims), dtype="float32")
     Rfc2_B = relay.var("fc2_B", shape=(n_classes,), dtype="float32")
 
-    x_prob = relay.nn.softmax(dense(x_fc, Rfc2_W, Rfc2_B))
-
+    x_prob_unnorm = approx_exp(dense(x_fc, Rfc2_W, Rfc2_B))
+    x_prob_sum = relay.sum(x_prob_unnorm, axis=-1)
+    x_prob = x_prob_unnorm / x_prob_sum
     outputs = relay.expr.Tuple([x_prob, h1])
     func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
     func = relay.ir_pass.infer_type(func)
@@ -367,7 +313,7 @@ def build_fast_wavernn_module(target="llvm"):
             func = relay.ir_pass.infer_type(func)
             graph, lib, new_params = relay.build_module.build(
                 func, target=TARGET,  params=params)
-    return (graph, lib, params)
+    return (graph, lib, new_params)
 
 
 def factored_relay_frame(a1, a2, m, x_0, h1_0):
@@ -432,6 +378,41 @@ def factored_relay_cpp_frame(a1, a2, m, x_0, h1_0):
     )
     return outs.asnumpy(), h1.asnumpy()
 
+def factored_relay_cpp_frame_fast(a1, a2, m, x_0, h1_0):
+    tvm_random_seed(10)
+    (x, h1) = (tvm.ndarray.array(x_0), tvm.ndarray.array(h1_0))
+    T = a1.shape[1]
+    (graph, lib, params) = build_fast_wavernn_module()
+    import tempfile
+    with tempfile.NamedTemporaryFile(delete=False, prefix="tvm_model_lib", suffix=".so") as lib_f:
+        lib.export_library(lib_f.name)
+    I_residual = m[0] @ I.weight[:, 1:1 + feat_dims].transpose(1, 0) + a1[0] @ I.weight[:, 1 + feat_dims:].transpose(1, 0)
+    fc1_residual = a2[0] @ fc1.weight[:, rnn_dims:].transpose(1, 0)
+
+    frame_func = tvm.get_global_func("tvm.contrib.wavernn.frame")
+
+    outs = tvm.ndarray.array(np.random.randn(T).astype("float32"))
+    h1 = tvm.ndarray.array(np.random.randn(1, rnn_dims).astype("float32"))
+    frame_func(
+        # Inputs
+        tvm.ndarray.array(I_residual),
+        tvm.ndarray.array(fc1_residual),
+        tvm.ndarray.array(x_0),
+        tvm.ndarray.array(h1_0),
+        # Outputs
+        outs,
+        h1,
+        # Temporary storage to make entire frame_func allocation free.
+        tvm.ndarray.array(np.random.randn(1, n_classes).astype("float32")),
+        tvm.ndarray.array(np.random.randn(1, rnn_dims).astype("float32")),
+        tvm.ndarray.array(np.random.randn(1, fc_dims).astype("float32")),
+        # Data for constructing the module.
+        graph,  # the graph JSON.
+        lib_f.name,  # the exported shared object.
+        relay.save_param_dict(params)  # the serialized parameters.
+    )
+    return outs.asnumpy(), h1.asnumpy()
+
 def test_factored_premul_frame():
     with torch.no_grad():
         outs_ref, h1_ref = reference()
@@ -451,6 +432,15 @@ def test_relay_cpp_frame():
         outs_ref, h1_ref = reference()
         outs_new, h1_new = factored_relay_cpp_frame(a1, a2, m, x_0, h1_0)
         np.testing.assert_allclose(outs_ref, outs_new, rtol=1e-4, atol=1e-4)
+        np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
+
+def test_relay_cpp_frame_fast():
+    with torch.no_grad():
+        outs_ref, h1_ref = reference()
+        outs_new, h1_new = factored_relay_cpp_frame_fast(a1, a2, m, x_0, h1_0)
+        np.testing.assert_allclose(outs_ref, outs_new, rtol=1e-4, atol=1e-4)
+        print(h1_ref, h1_new)
+        print(outs_ref, outs_new)
         np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
 
 

@@ -87,7 +87,6 @@ TVM_REGISTER_GLOBAL("tvm.contrib.wavernn.frame")
     // Update h1
     gr->CopyOutputTo(1, h1);
 
-
     // Compute and update new sampled x values
     gr->CopyOutputTo(0, x_proba);
 

@@ -1,5 +1,5 @@
 import logging
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.INFO)
 
 import torch
 from torch import nn
@@ -12,6 +12,8 @@ from tvm import autotvm
 import itertools
 import scipy.sparse as sp
 torch.manual_seed(42)
+
+logging.basicConfig(level=logging.INFO)
 
 
 def sparsify(arr, BS_R, BS_C, density):
@@ -342,14 +344,14 @@ def build_fast_wavernn_module(target="llvm", bfloat16=False, tune=False, profile
     outputs = relay.expr.Tuple([x_prob, h1])
     func = relay.Function(relay.ir_pass.free_vars(outputs), outputs)
     func = relay.ir_pass.infer_type(func)
-    print(func.astext())
+    # print(func.astext())
     TARGET = tvm.target.create(target)
     log_filename = "lpcnet_no_bf16_autotvm_skl.log"
 
     if tune:
         with relay.build_config(opt_level=2):
             func = relay.optimize(func, target=TARGET, params=params)
-            print(func.astext(show_meta_data=False))
+            # print(func.astext(show_meta_data=False))
             tasks = autotvm.task.extract_from_program(
                 func, target=TARGET, params=params, ops=(relay.op.nn.dense,))
             for i, tsk in enumerate(tasks):
@@ -393,10 +395,11 @@ def build_fast_wavernn_module(target="llvm", bfloat16=False, tune=False, profile
         lib_fname = tmp.relpath('net.tar')
         with TARGET:
             lib.export_library(lib_fname)
+
+    if profile:
         tracker = tvm.rpc.connect_tracker('0.0.0.0', 9198)
         remote = tracker.request('skl')
 
-    if profile:
         remote.upload(lib_fname)
         rlib = remote.load_module('net.tar')
         ctx = remote.cpu(0)
@@ -548,7 +551,7 @@ def test_relay_cpp_frame_fast():
         np.testing.assert_allclose(h1_ref, h1_new, rtol=1e-4, atol=1e-4)
 
 def skylake():
-    (graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu", bfloat16=True, profile=True)
+    (graph, lib, params) = build_fast_wavernn_module("llvm -mcpu=skylake-avx512 -target=x86_64-linux-gnu", bfloat16=True, profile=False, tune=False)
     with open(
             "skl_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_graph.json".format(**globals()),
             "w") as f:
@@ -575,5 +578,5 @@ def haswell():
 
     lib.save("hsw_fast_wavernn_rnn_dims_{rnn_dims}_fc_dims_{fc_dims}_feat_dims_{feat_dims}_aux_dims_{aux_dims}_lib.o".format(**globals()))
 
-skylake()
+# skylake()
 # haswell()

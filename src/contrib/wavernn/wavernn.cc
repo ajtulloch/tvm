@@ -35,7 +35,7 @@ TVM_REGISTER_GLOBAL("tvm.contrib.wavernn.frame")
 .set_body([](TVMArgs args, TVMRetValue *ret) {
   DLTensor* I_residual = args[0];
   DLTensor* fc1_residual = args[1];
-  DLTensor* x_0 = args[2];
+  NDArray x_0 = args[2];
   DLTensor* h1_0 = args[3];
   DLTensor* outs = args[4];
   DLTensor* h1_out = args[5];
@@ -56,7 +56,7 @@ TVM_REGISTER_GLOBAL("tvm.contrib.wavernn.frame")
 
   const size_t T = I_residual->shape[0];
 
-  DLTensor* x = x_0;
+  NDArray x = x_0;
   DLTensor* h1 = h1_0;
 
   auto sample_proba = [&](const float* p) -> float {
@@ -72,7 +72,8 @@ TVM_REGISTER_GLOBAL("tvm.contrib.wavernn.frame")
   };
 
   for (size_t t = 0; t < T; ++t) {
-    gr->SetInput(gr->GetInputIndex("x"), x);
+    // gr->SetInput(gr->GetInputIndex("x"), const_cast<DLTensor*>(x.operator->()));
+    gr->GetInput(gr->GetInputIndex("x")).swap(x);
     gr->SetInput(gr->GetInputIndex("h1"), h1);
 
     std::copy_n(static_cast<float*>(I_residual->data) + t * I_residual->shape[1],

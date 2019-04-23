@@ -283,7 +283,7 @@ def build(func, target=None, target_host=None, params=None):
         func = ir_pass.fuse_ops(func, cfg.opt_level)
         # Graph code generation
         func = ir_pass.infer_type(func)
-        print(func.astext(show_meta_data=False))
+        # print(func.astext(show_meta_data=False))
         graph_gen = _graph_gen.GraphRuntimeCodegen(mod=None, target=target)
         graph_json, lowered_funcs, params = graph_gen.codegen(func)
         mod = _tvm_build_module(

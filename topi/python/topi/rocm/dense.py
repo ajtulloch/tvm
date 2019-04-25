@@ -9,7 +9,7 @@ from .. import tag
 from .. import generic
 
 @dense.register("rocm")
-def dense_rocm(data, weight, bias=None):
+def dense_rocm(data, weight, bias=None, data_layout="NI", kernel_layout="OI", out_layout=""):
     """Dense operator for rocm backend.
 
     Parameters

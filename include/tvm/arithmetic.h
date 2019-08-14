@@ -245,11 +245,14 @@ class RewriteSimplifier {
               const Expr& new_expr,
               bool override = false);
 
+  std::function<void()> EnterConstraint(const Expr& constraint);
+
  private:
   friend class Analyzer;
   friend class ConstraintContext;
   friend class CanonicalSimplifier;
   explicit RewriteSimplifier(Analyzer* parent);
+
   ~RewriteSimplifier();
   class Impl;
   /*! \brief Internal impl */

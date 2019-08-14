@@ -221,6 +221,17 @@ Mutate_(const Add* op, const Expr& self) {
   return ret;
 }
 
+std::function<void()> RewriteSimplifier::Impl::EnterConstraint(const Expr& constraint) {
+  size_t old_literal_size = literal_constraints_.size();
+  literal_constraints_.push_back(constraint);
+  size_t new_literal_size = literal_constraints_.size();
+  auto frecover = [old_literal_size, new_literal_size, this]() {
+    CHECK_EQ(literal_constraints_.size(), new_literal_size);
+    literal_constraints_.resize(old_literal_size);
+  };
+  return frecover;
+}
+
 Expr RewriteSimplifier::Impl::
 Mutate_(const Sub* op, const Expr& self) {
   Expr ret = IRMutator::Mutate_(op, self);
@@ -1727,6 +1738,13 @@ Mutate_(const Call* op, const Expr& self) {
   if (op->is_intrinsic(Call::likely) && is_const(op->args[0])) {
     return op->args[0];
   }
+  if (op->is_intrinsic(Call::likely)) {
+    for (const auto& constraint : literal_constraints_) {
+      if (Equal(constraint, op->args[0])) {
+        return make_const(op->type, true);
+      }
+    }
+  }
   return ret;
 }
 
@@ -1761,6 +1779,7 @@ Expr RewriteSimplifier::operator()(const Expr& expr) {
   // Run simplification in post order
   Expr res = expr;
   int max_iter = 2;
+
   for (int i = 0; i < max_iter; ++i) {
     Expr new_expr = impl_->Mutate(res);
     if (new_expr.same_as(res)) return res;
@@ -1773,6 +1792,10 @@ void RewriteSimplifier::Update(const Var& var,
                                const Expr& info,
                                bool override) {
   impl_->Update(var, info, override);
+}
+
+std::function<void()> RewriteSimplifier::EnterConstraint(const Expr& constraint) {
+  return impl_->EnterConstraint(constraint);
 }
 
 RewriteSimplifier::RewriteSimplifier(Analyzer* parent)

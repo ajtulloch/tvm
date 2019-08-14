@@ -71,6 +71,7 @@ class RewriteSimplifier::Impl : public IRMutator {
   Expr Mutate_(const Let* op, const Expr& self) override;
   Expr Mutate_(const Variable* op, const Expr& self) override;
 
+  std::function<void()> EnterConstraint(const Expr& constraint);
  protected:
   /*! \brief internal structure for comparison. */
   enum CompareResult {
@@ -88,6 +89,9 @@ class RewriteSimplifier::Impl : public IRMutator {
   int recur_depth_{0};
   // internal variable map
   std::unordered_map<Var, Expr, ExprHash, ExprEqual> var_map_;
+
+  std::vector<Expr> literal_constraints_;
+
   // maximum number of recursion allowed during a single pass.
   static const constexpr int kMaxRecurDepth = 5;
 

@@ -26,6 +26,7 @@ under the License.
 
     <application
         android:allowBackup="true"
+        android:debuggable="true"
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"

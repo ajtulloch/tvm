@@ -14,7 +14,7 @@
 #-------------------------------------------------------------------------------
 APP_ABI = all
 
-APP_PLATFORM = android-24
+APP_PLATFORM = android-26
 
 # whether enable OpenCL during compile
 USE_OPENCL = 0
@@ -27,7 +27,7 @@ USE_SORT = 1
 
 ifeq ($(USE_VULKAN), 1)
   # Statically linking vulkan requires API Level 24 or higher
-  APP_PLATFORM = android-24
+  APP_PLATFORM = android-26
 endif
 
 # the additional include headers you want to add, e.g., SDK_PATH/adrenosdk/Development/Inc

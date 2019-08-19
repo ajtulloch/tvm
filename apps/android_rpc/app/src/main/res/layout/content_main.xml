@@ -40,7 +40,6 @@ under the License.
             android:hint="@string/input_address"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:inputType="phone"
             android:background="@android:drawable/editbox_background"/>
     </LinearLayout>
 

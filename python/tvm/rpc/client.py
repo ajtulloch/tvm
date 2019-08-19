@@ -318,7 +318,8 @@ class TrackerSession(object):
                 if value[0] != base.TrackerCode.SUCCESS:
                     raise RuntimeError("Invalid return value %s" % str(value))
                 url, port, matchkey = value[1]
-                return connect(url, port, matchkey, session_timeout)
+                print("Returned following: ", url, port, matchkey)
+                return connect('127.0.0.1', 5800, matchkey, session_timeout)
             except socket.error as err:
                 self.close()
                 last_err = err

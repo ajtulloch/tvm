@@ -33,7 +33,7 @@ namespace spirv {
 void IRBuilder::InitHeader() {
   CHECK_EQ(header_.size(), 0U);
   header_.push_back(spv::MagicNumber);
-  header_.push_back(spv::Version);
+  header_.push_back(0x10000);
   // generator: set to 0, unknown
   header_.push_back(0U);
   // Bound: set during Finalize
@@ -179,9 +179,13 @@ Value IRBuilder::FloatImm(const SType& dtype, double value) {
     uint64_t data = ptr[0];
     return GetConst_(dtype, &data);
   } else {
-    CHECK_EQ(dtype.type.bits(), 16);
-    return Cast(dtype,
-                FloatImm(GetSType(Float(32)), value));
+    __fp16 fvalue = static_cast<__fp16>(value);
+    uint16_t* ptr = reinterpret_cast<uint16_t*>(&fvalue);
+    uint64_t data = ptr[0];
+    return GetConst_(dtype, &data);
+    // CHECK_EQ(dtype.type.bits(), 16);
+    // return Cast(dtype,
+    //             FloatImm(GetSType(Float(32)), value));
   }
 }
 
@@ -511,28 +515,28 @@ Value IRBuilder::Cast(const SType& dst_type, spirv::Value value) {
   }
 }
 
-#define DEFINE_BUILDER_BINARY_USIGN_OP(_OpName, _Op)              \
-  Value IRBuilder::_OpName(Value a, Value b) {                    \
-    CHECK_EQ(a.stype.id, b.stype.id);                             \
-    if (a.stype.type.is_int() || a.stype.type.is_uint()) {        \
-      return MakeValue(spv::OpI ## _Op, a.stype, a, b);           \
-    } else {                                                      \
-      CHECK(a.stype.type.is_float());                             \
-      return MakeValue(spv::OpF ## _Op, a.stype, a, b);           \
-    }                                                             \
+#define DEFINE_BUILDER_BINARY_USIGN_OP(_OpName, _Op)       \
+  Value IRBuilder::_OpName(Value a, Value b) {             \
+    CHECK_EQ(a.stype.id, b.stype.id);                      \
+    if (a.stype.type.is_int() || a.stype.type.is_uint()) { \
+      return MakeValue(spv::OpI##_Op, a.stype, a, b);      \
+    } else {                                               \
+      CHECK(a.stype.type.is_float());                      \
+      return MakeValue(spv::OpF##_Op, a.stype, a, b);      \
+    }                                                      \
   }
 
-#define DEFINE_BUILDER_BINARY_SIGN_OP(_OpName, _Op)               \
-  Value IRBuilder::_OpName(Value a, Value b) {                    \
-    CHECK_EQ(a.stype.id, b.stype.id);                             \
-    if (a.stype.type.is_int()) {                                   \
-      return MakeValue(spv::OpS ## _Op, a.stype, a, b);            \
-    } else if (a.stype.type.is_uint()) {                           \
-      return MakeValue(spv::OpU ## _Op, a.stype, a, b);            \
-    } else {                                                       \
-      CHECK(a.stype.type.is_float());                              \
-      return MakeValue(spv::OpF ## _Op, a.stype, a, b);            \
-    }                                                              \
+#define DEFINE_BUILDER_BINARY_SIGN_OP(_OpName, _Op)   \
+  Value IRBuilder::_OpName(Value a, Value b) {        \
+    CHECK_EQ(a.stype.id, b.stype.id);                 \
+    if (a.stype.type.is_int()) {                      \
+      return MakeValue(spv::OpS##_Op, a.stype, a, b); \
+    } else if (a.stype.type.is_uint()) {              \
+      return MakeValue(spv::OpU##_Op, a.stype, a, b); \
+    } else {                                          \
+      CHECK(a.stype.type.is_float());                 \
+      return MakeValue(spv::OpF##_Op, a.stype, a, b); \
+    }                                                 \
   }
 
 DEFINE_BUILDER_BINARY_USIGN_OP(Add, Add);

@@ -59,7 +59,8 @@ RPC_SESS_MASK = 128
 
 
 def get_addr_family(addr):
-    res = socket.getaddrinfo(addr[0], addr[1], 0, 0, socket.IPPROTO_TCP)
+    res = socket.getaddrinfo(addr[0], addr[1], 0, 0, socket.IPPROTO_TCP, socket.AF_INET)
+    return socket.AF_INET
     return res[0][0]
 
 

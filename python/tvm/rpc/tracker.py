@@ -193,6 +193,7 @@ class TCPEventHandler(tornado_util.TCPHandler):
         message : bytearray
             The bytes received
         """
+        print(message)
         assert isinstance(message, bytes)
         if self._init_req_nbytes:
             self._init_conn(message)
@@ -224,16 +225,21 @@ class TCPEventHandler(tornado_util.TCPHandler):
 
     def call_handler(self, args):
         """Event handler when json request arrives."""
+        print(args)
         code = args[0]
         if code == TrackerCode.PUT:
+            print("PUT")
             key = args[1]
             port, matchkey = args[2]
             self.pending_matchkeys.add(matchkey)
             # got custom address (from rpc server)
+            print(key, port, matchkey)
             if args[3] is not None:
                 value = (self, args[3], port, matchkey)
             else:
                 value = (self, self._addr[0], port, matchkey)
+            print(value)
+            print("PORTS: ", args[3], self._addr[0], port)
             self._tracker.put(key, value)
             self.put_values.append(value)
             self.ret_value(TrackerCode.SUCCESS)
@@ -242,6 +248,7 @@ class TCPEventHandler(tornado_util.TCPHandler):
             user = args[2]
             priority = args[3]
             def _cb(value):
+                print(self._sock)
                 # if the connection is already closed
                 if not self._sock:
                     return False
@@ -298,6 +305,7 @@ class TrackerServerHandler(object):
         while True:
             try:
                 conn, addr = self._sock.accept()
+                print(conn, addr)
                 TCPEventHandler(self, conn, addr)
             except socket.error as err:
                 if err.args[0] in (errno.EAGAIN, errno.EWOULDBLOCK):
@@ -341,6 +349,7 @@ class TrackerServerHandler(object):
         cinfo = []
         # ignore client connections without key
         for conn in self._connections:
+            print(conn.summary())
             res = conn.summary()
             if res.get("key", "").startswith("server"):
                 cinfo.append(res)
@@ -383,6 +392,7 @@ class Tracker(object):
             logger.setLevel(logging.WARN)
 
         sock = socket.socket(base.get_addr_family((host, port)), socket.SOCK_STREAM)
+        print("Using family", base.get_addr_family((host, port)))
         self.port = None
         self.stop_key = base.random_key("tracker")
         for my_port in range(port, port_end):

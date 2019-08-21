@@ -145,6 +145,8 @@ class CodeGenSPIRV:
   std::unordered_map<const Variable*, spirv::Value> var_map_;
   // The analyzer.
   std::unique_ptr<arith::Analyzer> analyzer_;
+
+  std::unordered_map<std::string, spirv::Value> mat4x4_cache_;
 };
 
 }  // namespace codegen

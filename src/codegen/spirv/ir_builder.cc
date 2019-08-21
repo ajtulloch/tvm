@@ -264,10 +264,10 @@ void IRBuilder::CommitKernelFunction(const Value& func, const std::string& name)
 
 void IRBuilder::StartFunction(const Value& func) {
   CHECK_EQ(func.flag, kFunction);
-  this->MakeInst(
+  this->MakeFunctionHeaderInst(
       spv::OpFunction, t_void_, func, 0, t_void_func_);
   spirv::Label start_label = this->NewLabel();
-  this->StartLabel(start_label);
+  this->StartFunctionHeaderLabel(start_label);
 }
 
 void IRBuilder::SetLocalSize(const Value& func,
@@ -288,7 +288,7 @@ Value IRBuilder::Allocate(const SType& value_type,
   Value val = NewValue(ptr_type, kStructArrayPtr);
   if (storage_class == spv::StorageClassFunction) {
     ib_.Begin(spv::OpVariable)
-        .AddSeq(ptr_type, val, storage_class).Commit(&function_);
+        .AddSeq(ptr_type, val, storage_class).Commit(&function_header_);
   } else {
     ib_.Begin(spv::OpVariable)
         .AddSeq(ptr_type, val, storage_class).Commit(&global_);
@@ -396,6 +396,22 @@ SType IRBuilder::DeclareType(const Type& dtype) {
         t, base_type, dtype.lanes()).Commit(&global_);
     return t;
   }
+}
+
+SType IRBuilder::Get4x4FloatMatrixSType() {
+  uint32_t type_key = 0xffffffff;
+  auto it = pod_type_tbl_.find(type_key);
+  if (it != pod_type_tbl_.end()) {
+    return it->second;
+  }
+
+  SType t;
+  t.id = id_counter_++;
+  t.type = Float(32).with_lanes(16);
+  SType base_type = GetSType(Float(32).with_lanes(4));
+  ib_.Begin(spv::OpTypeMatrix).AddSeq(t, base_type, 4).Commit(&global_);
+  pod_type_tbl_[type_key] = t;
+  return t;
 }
 
 PhiValue IRBuilder::MakePhi(const SType& out_type, uint32_t num_incoming) {

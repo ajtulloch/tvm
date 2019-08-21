@@ -1,0 +1,133 @@
+; SPIR-V
+; Version: 1.0
+; Generator: Khronos; 0
+; Bound: 200
+; Schema: 0
+               OpCapability Shader
+          %1 = OpExtInstImport "GLSL.std.450"
+               OpMemoryModel Logical GLSL450
+               OpEntryPoint GLCompute %16 "default_function_kernel0" %gl_WorkGroupID %gl_LocalInvocationID
+               OpExecutionMode %16 LocalSize 8 1 24
+               OpDecorate %_runtimearr_v4float ArrayStride 16
+               OpMemberDecorate %_struct_11 0 Offset 0
+               OpDecorate %_struct_11 BufferBlock
+               OpDecorate %13 DescriptorSet 0
+               OpDecorate %13 Binding 0
+               OpDecorate %14 DescriptorSet 0
+               OpDecorate %14 Binding 1
+               OpDecorate %15 DescriptorSet 0
+               OpDecorate %15 Binding 2
+               OpDecorate %gl_WorkGroupID BuiltIn WorkgroupId
+               OpDecorate %gl_LocalInvocationID BuiltIn LocalInvocationId
+        %int = OpTypeInt 32 1
+       %bool = OpTypeBool
+      %float = OpTypeFloat 32
+      %int_0 = OpConstant %int 0
+       %void = OpTypeVoid
+          %8 = OpTypeFunction %void
+    %v4float = OpTypeVector %float 4
+%_runtimearr_v4float = OpTypeRuntimeArray %v4float
+ %_struct_11 = OpTypeStruct %_runtimearr_v4float
+%_ptr_Uniform__struct_11 = OpTypePointer Uniform %_struct_11
+         %13 = OpVariable %_ptr_Uniform__struct_11 Uniform
+         %14 = OpVariable %_ptr_Uniform__struct_11 Uniform
+         %15 = OpVariable %_ptr_Uniform__struct_11 Uniform
+      %v3int = OpTypeVector %int 3
+%_ptr_Input_v3int = OpTypePointer Input %v3int
+%gl_WorkGroupID = OpVariable %_ptr_Input_v3int Input
+%_ptr_Input_int = OpTypePointer Input %int
+%gl_LocalInvocationID = OpVariable %_ptr_Input_v3int Input
+      %int_2 = OpConstant %int 2
+    %float_0 = OpConstant %float 0
+         %38 = OpConstantComposite %v4float %float_0 %float_0 %float_0 %float_0
+         %41 = OpConstantComposite %v4float %float_0 %float_0 %float_0 %float_0
+      %int_1 = OpConstant %int 1
+         %44 = OpConstantComposite %v4float %float_0 %float_0 %float_0 %float_0
+         %46 = OpConstantComposite %v4float %float_0 %float_0 %float_0 %float_0
+      %int_3 = OpConstant %int 3
+    %int_144 = OpConstant %int 144
+%_ptr_Uniform_v4float = OpTypePointer Uniform %v4float
+   %int_4608 = OpConstant %int 4608
+    %int_576 = OpConstant %int 576
+      %int_4 = OpConstant %int 4
+%mat4v4float = OpTypeMatrix %v4float 4
+    %int_768 = OpConstant %int 768
+     %int_96 = OpConstant %int 96
+         %16 = OpFunction %void None %8
+         %17 = OpLabel
+         %22 = OpAccessChain %_ptr_Input_int %gl_WorkGroupID %int_0
+         %23 = OpLoad %int %22
+         %30 = OpAccessChain %_ptr_Input_int %gl_LocalInvocationID %int_0
+         %31 = OpLoad %int %30
+         %35 = OpAccessChain %_ptr_Input_int %gl_LocalInvocationID %int_2
+         %36 = OpLoad %int %35
+               OpBranch %50
+         %50 = OpLabel
+        %199 = OpPhi %v4float %46 %17 %134 %51
+        %198 = OpPhi %v4float %44 %17 %121 %51
+        %197 = OpPhi %v4float %41 %17 %108 %51
+        %196 = OpPhi %v4float %38 %17 %95 %51
+         %54 = OpPhi %int %int_0 %17 %136 %51
+         %55 = OpSLessThan %bool %54 %int_144
+               OpLoopMerge %53 %51 None
+               OpBranchConditional %55 %51 %53 128 1
+         %51 = OpLabel
+         %60 = OpIMul %int %23 %int_4608
+         %62 = OpIMul %int %31 %int_576
+         %63 = OpIAdd %int %60 %62
+         %65 = OpIMul %int %54 %int_4
+         %66 = OpIAdd %int %63 %65
+         %67 = OpInBoundsAccessChain %_ptr_Uniform_v4float %14 %int_0 %66
+         %68 = OpLoad %v4float %67 None
+         %69 = OpIMul %int %36 %int_576
+         %71 = OpIAdd %int %69 %65
+         %72 = OpInBoundsAccessChain %_ptr_Uniform_v4float %13 %int_0 %71
+         %73 = OpLoad %v4float %72 None
+         %77 = OpIAdd %int %71 %int_1
+         %78 = OpInBoundsAccessChain %_ptr_Uniform_v4float %13 %int_0 %77
+         %79 = OpLoad %v4float %78 None
+         %83 = OpIAdd %int %71 %int_2
+         %84 = OpInBoundsAccessChain %_ptr_Uniform_v4float %13 %int_0 %83
+         %85 = OpLoad %v4float %84 None
+         %89 = OpIAdd %int %71 %int_3
+         %90 = OpInBoundsAccessChain %_ptr_Uniform_v4float %13 %int_0 %89
+         %91 = OpLoad %v4float %90 None
+         %93 = OpCompositeConstruct %mat4v4float %73 %79 %85 %91
+         %94 = OpVectorTimesMatrix %v4float %68 %93
+         %95 = OpFAdd %v4float %196 %94
+        %104 = OpIAdd %int %66 %int_1
+        %105 = OpInBoundsAccessChain %_ptr_Uniform_v4float %14 %int_0 %104
+        %106 = OpLoad %v4float %105 None
+        %107 = OpVectorTimesMatrix %v4float %106 %93
+        %108 = OpFAdd %v4float %197 %107
+        %117 = OpIAdd %int %66 %int_2
+        %118 = OpInBoundsAccessChain %_ptr_Uniform_v4float %14 %int_0 %117
+        %119 = OpLoad %v4float %118 None
+        %120 = OpVectorTimesMatrix %v4float %119 %93
+        %121 = OpFAdd %v4float %198 %120
+        %130 = OpIAdd %int %66 %int_3
+        %131 = OpInBoundsAccessChain %_ptr_Uniform_v4float %14 %int_0 %130
+        %132 = OpLoad %v4float %131 None
+        %133 = OpVectorTimesMatrix %v4float %132 %93
+        %134 = OpFAdd %v4float %199 %133
+        %136 = OpIAdd %int %54 %int_1
+               OpBranch %50
+         %53 = OpLabel
+        %140 = OpIMul %int %23 %int_768
+        %142 = OpIMul %int %31 %int_96
+        %143 = OpIAdd %int %140 %142
+        %144 = OpIMul %int %36 %int_4
+        %145 = OpIAdd %int %143 %144
+        %146 = OpInBoundsAccessChain %_ptr_Uniform_v4float %15 %int_0 %145
+               OpStore %146 %196 None
+        %154 = OpIAdd %int %145 %int_1
+        %155 = OpInBoundsAccessChain %_ptr_Uniform_v4float %15 %int_0 %154
+               OpStore %155 %197 None
+        %163 = OpIAdd %int %145 %int_2
+        %164 = OpInBoundsAccessChain %_ptr_Uniform_v4float %15 %int_0 %163
+               OpStore %164 %198 None
+        %172 = OpIAdd %int %145 %int_3
+        %173 = OpInBoundsAccessChain %_ptr_Uniform_v4float %15 %int_0 %172
+               OpStore %173 %199 None
+               OpReturn
+               OpFunctionEnd

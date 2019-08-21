@@ -209,7 +209,7 @@ struct VulkanCommandBuffer {
 class VulkanCommandPool {
  public:
   /*! \brief Maximum number of pending jobs in the pool */
-  static constexpr const int kMaxPending = 4 * 10;
+  static constexpr const int kMaxPending = 4 * 100;
   /*! \brief Maximum number of pending jobs in the pool */
   static constexpr const int kMaxNumArgs = 16;
   /*!

@@ -6,9 +6,9 @@
  * to you under the Apache License, Version 2.0 (the
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
- * 
+ *
  *   http://www.apache.org/licenses/LICENSE-2.0
- * 
+ *
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -302,6 +302,7 @@ class IRBuilder {
     data.insert(data.end(), debug_.begin(), debug_.end());
     data.insert(data.end(), decorate_.begin(), decorate_.end());
     data.insert(data.end(), global_.begin(), global_.end());
+    data.insert(data.end(), function_header_.begin(), function_header_.end());
     data.insert(data.end(), function_.begin(), function_.end());
     return data;
   }
@@ -322,6 +323,12 @@ class IRBuilder {
     MakeInst(spv::OpLabel, label);
     curr_label_ = label;
   }
+
+  void StartFunctionHeaderLabel(Label label) {
+    MakeFunctionHeaderInst(spv::OpLabel, label);
+    curr_label_ = label;
+  }
+
   /*! \return The current label */
   Label CurrentLabel() const {
     return curr_label_;
@@ -379,6 +386,11 @@ class IRBuilder {
   Instr MakeInst(spv::Op op, Args&& ...args) {
     return ib_.Begin(op).AddSeq(std::forward<Args>(args)...).Commit(&function_);
   }
+
+  template<typename... Args>
+    Instr MakeFunctionHeaderInst(spv::Op op, Args&& ...args) {
+    return ib_.Begin(op).AddSeq(std::forward<Args>(args)...).Commit(&function_header_);
+  }
   /*!
    * \brief Make a new SSA value,
    *
@@ -394,6 +406,7 @@ class IRBuilder {
     MakeInst(op, out_type, val, std::forward<Args>(args)...);
     return val;
   }
+
   /*!
    * \brief Make a phi value.
    *
@@ -426,12 +439,16 @@ class IRBuilder {
    * \return The corresponding spirv type.
    */
   SType GetSType(const tvm::Type& dtype);
+  SType Get4x4FloatMatrixSType();
+
   /*!
    * \brief Get the pointer type that points to value_type
    * \param value_type.
    * \param storage_class The storage class
    * \return The corresponding spirv type.
    */
+
+
   SType GetPointerType(const SType& value_type,
                        spv::StorageClass storage_class);
   /*!
@@ -614,6 +631,7 @@ class IRBuilder {
     /*! \brief Global segment: types, variables, types */
   std::vector<uint32_t> global_;
   /*! \brief Function segment */
+  std::vector<uint32_t> function_header_;
   std::vector<uint32_t> function_;
 };
 

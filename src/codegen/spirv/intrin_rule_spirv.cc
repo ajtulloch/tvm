@@ -78,6 +78,9 @@ TVM_REGISTER_GLOBAL("tvm.intrin.rule.vulkan.pow")
 TVM_REGISTER_GLOBAL("tvm.intrin.rule.vulkan.tanh")
 .set_body(DispatchGLSLPureIntrin<GLSLstd450Tanh>);
 
+// TVM_REGISTER_GLOBAL("tvm.intrin.rule.vulkan.fma")
+// .set_body(DispatchGLSLPureIntrin<GLSLstd450Fma>);
+
 }  // namespace spirv
 }  // namespace codegen
 }  // namespace tvm

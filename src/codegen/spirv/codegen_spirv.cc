@@ -88,6 +88,7 @@ void CodeGenSPIRV::InitFuncState() {
   analyzer_.reset(new arith::Analyzer());
   builder_.reset(new spirv::IRBuilder());
   builder_->InitHeader();
+  mat4x4_cache_.clear();
 }
 
 spirv::Value CodeGenSPIRV::GetThreadIndex(
@@ -319,20 +320,40 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const Call* op) {
         spv::OpBitCount,
         builder_->GetSType(op->type),
         MakeValue(op->args[0]));
+  } else if (op->is_intrinsic("vk::MatrixTimesVector")) {
+    auto expr_str = [](Expr e) {
+      std::stringstream ss;
+      ss << e;
+      return ss.str();
+
+    };
+    const auto v = MakeValue(op->args[4]);
+
+    LOG(INFO) << "op->args[0]: " << op->args[0];
+    if (mat4x4_cache_.find(expr_str(op->args[0])) != mat4x4_cache_.end()) {
+      LOG(INFO) << "Cache hit: ";
+      return builder_->MakeValue(spv::OpVectorTimesMatrix, builder_->GetSType(op->type), v,
+                                 mat4x4_cache_[expr_str(op->args[0])]);
+    }
+    LOG(INFO) << "Cache miss: ";
+    const auto m0 = MakeValue(op->args[0]);
+    const auto m1 = MakeValue(op->args[1]);
+    const auto m2 = MakeValue(op->args[2]);
+    const auto m3 = MakeValue(op->args[3]);
+    const auto m = builder_->MakeValue(spv::OpCompositeConstruct,
+                                       builder_->Get4x4FloatMatrixSType(), m0, m1, m2, m3);
+    mat4x4_cache_[expr_str(op->args[0])] = m;
+    return builder_->MakeValue(spv::OpVectorTimesMatrix, builder_->GetSType(op->type), v, m);
   } else {
-    if (op->call_type == Call::Intrinsic ||
-        op->call_type == Call::PureIntrinsic) {
-      LOG(FATAL) << "Unresolved intrinsic " << op->name
-                 << " with return type " << op->type;
-    } else if (op->call_type == Call::Extern ||
-               op->call_type == Call::PureExtern) {
-      LOG(FATAL) << "Unresolved extern " << op->name
-                 << " with return type " << op->type;
+    if (op->call_type == Call::Intrinsic || op->call_type == Call::PureIntrinsic) {
+      LOG(FATAL) << "Unresolved intrinsic " << op->name << " with return type " << op->type;
+    } else if (op->call_type == Call::Extern || op->call_type == Call::PureExtern) {
+      LOG(FATAL) << "Unresolved extern " << op->name << " with return type " << op->type;
     } else {
       LOG(FATAL) << "Unresolved call type " << op->call_type;
     }
     return spirv::Value();
-  }
+    }
 }
 
 spirv::Value CodeGenSPIRV::VisitExpr_(const Ramp* op) {
@@ -406,6 +427,7 @@ spirv::Value CodeGenSPIRV::VisitExpr_(const Load* op) {
               << "Only aligned vector access is allowed in SPIRV";
           Expr vec_index = ir::Simplify(
               ramp->base / make_const(ramp->base.type(), ramp->lanes));
+
           spirv::Value ptr = builder_->StructArrayAccess(
               ptr_type, buffer, MakeValue(vec_index));
           return builder_->MakeValue(spv::OpLoad, content_type, ptr, mask);

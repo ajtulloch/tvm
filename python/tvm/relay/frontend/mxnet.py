@@ -39,7 +39,7 @@ __all__ = ['from_mxnet']
 _activation_map = {
     "sigmoid": _op.sigmoid,
     "tanh"   : _op.tanh,
-    "relu"   : _op.nn.relu
+    "relu"   : _op.nn.relu,
 }
 
 def _mx_fully_connected(inputs, attrs):
@@ -83,12 +83,27 @@ def _mx_activations(inputs, attrs):
     assert len(inputs) == 1
     if act_type == "softrelu":
         def _stable_softrelu(x):
-            # log(1 + exp(-abs(x))) + relu(x)
+            # y = log(1 + exp(-abs(x))) + relu(x)
             one = _expr.const(1, dtype="float32")
             exp_neg_abs_x = _op.exp(_op.negative(_op.abs(x)))
             return _op.add(_op.log(_op.add(one, exp_neg_abs_x)),
                            _op.nn.relu(x))
         return _stable_softrelu(inputs[0])
+    if act_type == "hard_swish":
+        def _hswish(x):
+            # relu6(x+3) * x * (1.0 / 6.0)
+            one_over_six = _expr.const(1.0 / 6.0, dtype="float32")
+            three = _expr.const(3.0, dtype="float32")
+            clip = _op.clip(_op.add(x, three), a_min=0, a_max=6)
+            return _op.multiply(_op.multiply(x, clip), one_over_six)
+        return _hswish(inputs[0])
+    if act_type == "hard_sigmoid":
+        def _hsigmoid(x):
+            # y = clip(x * 0.2 + 0.5, 0, 1)
+            alpha = _expr.const(0.2, dtype="float32")
+            beta = _expr.const(0.5, dtype="float32")
+            return _op.clip(_op.add(_op.multiply(x, alpha), beta), a_min=0, a_max=1)
+        return _hsigmoid(inputs[0])
     if act_type not in _activation_map:
         raise tvm.error.OpNotImplemented(
             'Operator {} is not supported for frontend MXNet.'.format(act_type))
@@ -644,6 +659,13 @@ def _mx_tile(inputs, attrs):
     return _op.tile(inputs[0], **new_attrs)
 
 
+def _mx_swap_axis(inputs, attrs):
+    assert len(inputs) == 1
+    assert attrs.get_int("dim1") == 1
+    assert attrs.get_int("dim2") == 2
+    return _op.transpose(inputs[0], axes=[0, 2, 1, 3, 4])
+
+
 def _mx_take(inputs, attrs):
     assert len(inputs) == 2
     mode = attrs.get_str("mode", "clip")
@@ -1135,6 +1157,7 @@ _convert_map = {
     "Softmax"       : _softmax_op(_op.nn.softmax),
     # per op specialization
     "Reshape"       : _reshape,
+    "SwapAxis"       : _mx_swap_axis,
     "reshape"       : _reshape,
     "Cast"          : _cast,
     "clip"          : _clip,

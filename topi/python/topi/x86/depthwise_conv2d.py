@@ -210,10 +210,15 @@ def _topi_nn_depthwise_conv2d_NCHWc(*args, **kwargs):
     out_width = (width - kw + 2 * pw) // sw + 1
     out_channel = filter_channel * channel_multiplier
 
+    # Create schedule config
+    def enforce_mod_16(y):
+        assert len(y.size) == 2
+        outer, inner = y.size[0], y.size[1]
+        return inner in (1, 8, 16, 32, 64)
     # get config here
     cfg = get_config()
-    cfg.define_split("tile_ic", in_channel, num_outputs=2)
-    cfg.define_split("tile_oc", out_channel, num_outputs=2)
+    cfg.define_split("tile_ic", in_channel, num_outputs=2, filter=enforce_mod_16)
+    cfg.define_split("tile_oc", out_channel, num_outputs=2, filter=enforce_mod_16)
     cfg.define_split("tile_ow", out_width, num_outputs=2, filter=lambda y: y.size[-1] <= 64)
 
     # change shape with the value in config

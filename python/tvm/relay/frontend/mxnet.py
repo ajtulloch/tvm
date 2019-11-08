@@ -320,6 +320,10 @@ def _mx_dropout(inputs, attrs):
     rate = attrs.get_float("p", 0.5)
     return _op.nn.dropout(inputs[0], rate=rate)
 
+def _mx_dropconnect(inputs, attrs):
+    # just pass-through at inference
+    return inputs[0]
+
 
 def _mx_BlockGrad(inputs, attrs): #pylint: disable=unused-argument
     return inputs
@@ -1174,6 +1178,7 @@ _convert_map = {
     "Pooling"       : _mx_pooling,
     "Pooling_v1"    : _mx_pooling,
     "Dropout"       : _mx_dropout,
+    "DropConnect"   : _mx_dropconnect,
     "BatchNorm"     : _mx_batch_norm,
     "BatchNorm_v1"  : _mx_batch_norm,
     "InstanceNorm"  : _mx_instance_norm,

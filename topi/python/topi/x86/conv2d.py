@@ -83,11 +83,15 @@ def _create_tuning_space(cfg, data, kernel, strides, padding, dilation, layout):
     ow = (w - kw + 2 * pw) // sw + 1
 
     # Create schedule config
-    cfg.define_split("tile_ic", ic, num_outputs=2)
-    cfg.define_split("tile_oc", oc, num_outputs=2)
+    def enforce_mod_16(y):
+        assert len(y.size) == 2
+        outer, inner = y.size[0], y.size[1]
+        return inner in (1, 8, 16, 32, 64)
+    cfg.define_split("tile_ic", ic, num_outputs=2, filter=enforce_mod_16)
+    cfg.define_split("tile_oc", oc, num_outputs=2, filter=enforce_mod_16)
     cfg.define_split("tile_ow", ow, num_outputs=2, filter=lambda y: y.size[-1] <= 64)
     if is_kernel_1x1:
-        cfg.define_knob("tile_oh", [1, 2] if oh > 1 else [1])
+        cfg.define_knob("tile_oh", [1, 2, 4] if oh > 1 else [1])
     else:
         cfg.define_knob("unroll_kw", [True, False])
 

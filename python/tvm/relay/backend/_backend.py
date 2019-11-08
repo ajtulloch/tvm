@@ -49,8 +49,9 @@ def lower(sch, inputs, func_name, source_func):
     # pylint: disable=broad-except
     try:
         f = _build.lower(sch, inputs, name=func_name)
-        # logging.debug("lower function %s", func_name)
-        # logging.debug("%s", _build.lower(sch, inputs, simple_mode=True))
+        import logging
+        logging.info("lower function %s", func_name)
+        logging.info("%s", _build.lower(sch, inputs, simple_mode=True))
     except Exception:
         msg = traceback.format_exc()
         msg += "Error during compile function\n"

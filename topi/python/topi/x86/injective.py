@@ -101,19 +101,19 @@ def schedule_concatenate(outs):
                 sch[tensor].vectorize(inner_i)
 
     outs = [outs] if isinstance(outs, tvm.tensor.Tensor) else outs
-    x = outs[0]
     s = tvm.create_schedule([x.op for x in outs])
     tvm.schedule.AutoInlineInjective(s)
-    if len(s[x].op.axis) >= 5:
-        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
-        vectorize(s, x, 64)
-        s[x].parallel(fused)
-    elif len(s[x].op.axis) >= 3:
-        fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
-        s[x].parallel(fused)
-    else:
-        s[x].parallel(s[x].op.axis[0])
-    return s
+    for x in outs:
+        if len(s[x].op.axis) >= 5:
+            fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1], s[x].op.axis[2])
+            vectorize(s, x, 64)
+            s[x].parallel(fused)
+        elif len(s[x].op.axis) >= 3:
+            fused = s[x].fuse(s[x].op.axis[0], s[x].op.axis[1])
+            s[x].parallel(fused)
+        else:
+            s[x].parallel(s[x].op.axis[0])
+        return s
 
 schedule_elemwise = schedule_injective
 schedule_broadcast = schedule_injective

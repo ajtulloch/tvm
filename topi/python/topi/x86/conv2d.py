@@ -83,8 +83,17 @@ def _create_tuning_space(cfg, data, kernel, strides, padding, dilation, layout):
     ow = (w - kw + 2 * pw) // sw + 1
 
     # Create schedule config
-    cfg.define_split("tile_ic", ic, num_outputs=2, filter=lambda y: y.size[-1] in (1, 8, 16) and ic % y.size[-1] == 0)
-    cfg.define_split("tile_oc", oc, num_outputs=2, filter=lambda y: y.size[-1] in (1, 8, 16) and oc % y.size[-1] == 0)
+    def powers_of_two_always(ax, inner):
+        if ax % 32 == 0:
+            return inner in (32,)
+        if ax % 16 == 0:
+            return inner in (16,)
+        if ax % 8 == 0:
+            return inner in (8,)
+        return inner == 1
+
+    cfg.define_split("tile_ic", ic, num_outputs=2, filter=lambda y: powers_of_two_always(ic, y.size[-1]))
+    cfg.define_split("tile_oc", oc, num_outputs=2, filter=lambda y: powers_of_two_always(oc, y.size[-1]))
     cfg.define_split("tile_ow", ow, num_outputs=2, filter=lambda y: y.size[-1] <= 64)
     if is_kernel_1x1:
         cfg.define_knob("tile_oh", [1, 2, 4] if oh > 1 else [1])

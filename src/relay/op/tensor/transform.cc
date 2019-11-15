@@ -2070,6 +2070,8 @@ bool SplitRel(const Array<Type>& types,
     << "axis should be within the input dimension range.";
 
   if (const IntImm* sections = param->indices_or_sections.as<IntImm>()) {
+    // LOG(INFO) << "data->shape[axis]: " << data->shape[axis] << ", axis: " << axis
+    //           << ", split: " << sections->value;
     CHECK(reporter->Assert(indexmod(data->shape[axis],
                                     sections->value) == make_zero(Int(64))))
         << "indices_or_sections need to be able to divide input.shape[axis]";
@@ -2137,7 +2139,7 @@ Array<Array<Layout>> SplitLayout(
 
   Layout ret;
   bool is_new_layout_selected = false;
-  LOG(INFO) << "Split rel: " << new_in_layouts << ", " << old_in_layouts;
+  LOG(INFO) << "Split rel: " << new_in_layouts << ", " << old_in_layouts << ", " << old_in_shapes;
   if (new_in_layouts.defined()) {
     LOG(INFO) << "New split layouts defined:" << new_in_layouts;
     // this function is called after some operators are alternated.
@@ -2175,6 +2177,57 @@ Array<Array<Layout>> SplitLayout(
       return Array<Array<Layout>>{{Layout::Undef()}, Array<Layout>(num_sections, Layout::Undef())};
     }
   }
+  LOG(INFO) << "New split layout: " << ret
+            << ", shapes: " << old_in_shapes[0][1].as<IntImm>()->value;
+
+  if (ret.Equals(Layout("NCHW16c"))) {
+    if (old_in_shapes[0][1].as<IntImm>()->value % 32 != 0) {
+      LOG(INFO) << "Bailing out on new layout for NCHW16c, shape: "
+                << old_in_shapes[0][1].as<IntImm>()->value;
+      if (old_in_shapes[0][1].as<IntImm>()->value % 32 == 0 && false) {
+        ret = Layout("NCHW16c");
+      } else if (old_in_shapes[0][1].as<IntImm>()->value % 16 == 0 && false) {
+        ret = Layout("NCHW8c");
+      } else {
+        is_new_layout_selected = false;
+        param->axis = axis;
+        ret = Layout();
+      }
+    }
+  }
+
+  if (ret.Equals(Layout("NCHW8c"))) {
+    if (old_in_shapes[0][1].as<IntImm>()->value % 16 != 0) {
+      LOG(INFO) << "Bailing out on new layout for NCHW8c, shape: "
+                << old_in_shapes[0][1].as<IntImm>()->value;
+      if (old_in_shapes[0][1].as<IntImm>()->value % 32 == 0 && false) {
+        ret = Layout("NCHW16c");
+      } else if (old_in_shapes[0][1].as<IntImm>()->value % 16 == 0 && false) {
+        ret = Layout("NCHW8c");
+      } else {
+        is_new_layout_selected = false;
+        param->axis = axis;
+        ret = Layout();
+      }
+    }
+  }
+
+  if (ret.Equals(Layout("NCHW32c"))) {
+    if (old_in_shapes[0][1].as<IntImm>()->value % 64 != 0) {
+      LOG(INFO) << "Bailing out on new layout for NCHW32c, shape: "
+                << old_in_shapes[0][1].as<IntImm>()->value;
+      if (old_in_shapes[0][1].as<IntImm>()->value % 32 == 0 && false) {
+        ret = Layout("NCHW16c");
+      } else if (old_in_shapes[0][1].as<IntImm>()->value % 16 == 0 && false) {
+        ret = Layout("NCHW8c");
+      } else {
+        is_new_layout_selected = false;
+        param->axis = axis;
+        ret = Layout();
+      }
+    }
+  }
+
   LOG(INFO) << "Using new split layout: "
             << Array<Array<Layout>>{Array<Layout>(old_in_layouts.size(), ret),
                                     Array<Layout>(num_sections, ret)};

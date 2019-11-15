@@ -500,7 +500,17 @@ def _alter_conv2d_layout_arm(attrs, inputs, tinfos, F):
 
     if F.__name__ == 'tvm.relay.op':
         # Derive channels for frontends (e.g ONNX) that miss "channel" field.
-        new_attrs["channels"] = inputs[1].checked_type.shape[attrs['kernel_layout'].index('O')]
+        # try:
+        #     inputs[1].checked_type
+        # except:
+        #     return None
+        #     # import ipdb; ipdb.set_trace()
+
+        try:
+            new_attrs["channels"] = inputs[1].checked_type.shape[attrs['kernel_layout'].index('O')]
+        except:
+            pass
+        pass
 
     dilation = attrs.get_int_tuple("dilation")
     strides = attrs.get_int_tuple("strides")

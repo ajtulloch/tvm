@@ -217,8 +217,9 @@ def _topi_nn_depthwise_conv2d_NCHWc(*args, **kwargs):
         return inner in (1, 8, 16, 32, 64)
     # get config here
     cfg = get_config()
-    cfg.define_split("tile_ic", in_channel, num_outputs=2, filter=enforce_mod_16)
-    cfg.define_split("tile_oc", out_channel, num_outputs=2, filter=enforce_mod_16)
+    cfg.define_split("tile_ic", in_channel, num_outputs=2, filter=lambda y: y.size[-1] in (1, 8, 16) and in_channel % y.size[-1] == 0)
+    cfg.define_split("tile_oc", out_channel, num_outputs=2, filter=lambda y: y.size[-1] in (1, 8, 16) and out_channel % y.size[-1] == 0)
+
     cfg.define_split("tile_ow", out_width, num_outputs=2, filter=lambda y: y.size[-1] <= 64)
 
     # change shape with the value in config

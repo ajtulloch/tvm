@@ -290,6 +290,7 @@ Array<Array<Layout>> ConcatenateLayout(
 
   Layout ret;
   bool is_new_layout_selected = false;
+  LOG(INFO) << "Concatenate rel: " << new_in_layouts << ", " << old_in_layouts;
   if (new_in_layouts.defined()) {  // this function is called after some operators are alternated.
     // If all the new input layouts are same, the new in layout gets selected.  For axis, the new
     // axis in the new layout is identified. The param->axis is then modified on the fly to conform
@@ -306,6 +307,7 @@ Array<Array<Layout>> ConcatenateLayout(
       ret = new_in_layouts[0];
       param->axis = new_index;
       is_new_layout_selected = true;
+      LOG(INFO) << "new concate layout selected";
     }
   }
 
@@ -319,10 +321,13 @@ Array<Array<Layout>> ConcatenateLayout(
     }
 
     if (ret.ndim() <= axis || !ret[axis].IsPrimal()) {
+      LOG(INFO) << "Failed to select a new concat layout: "
+                << Array<Array<Layout>>{{Layout::Undef()}, {Layout::Undef()}};
       return Array<Array<Layout> > {{Layout::Undef()}, {Layout::Undef()}};
     }
   }
-
+  LOG(INFO) << "Successfully selected a new concat layout: "
+            << Array<Array<Layout>>{Array<Layout>(old_in_layouts.size(), ret), {ret}};
   return Array<Array<Layout> > {Array<Layout>(old_in_layouts.size(), ret), {ret}};
 }
 
@@ -2002,6 +2007,7 @@ Array<Tensor> StridedSliceCompute(const Attrs& attrs,
 }
 
 
+
 TVM_REGISTER_API("relay.op._make.strided_slice")
 .set_body_typed(MakeStridedSlice);
 
@@ -2116,6 +2122,67 @@ Array<Tensor> SplitCompute(const Attrs& attrs,
   }
 }
 
+Array<Array<Layout>> SplitLayout(
+    const Attrs& attrs,
+    const Array<Layout>& new_in_layouts,
+    const Array<Layout>& old_in_layouts,
+    const Array<Array<IndexExpr>> &old_in_shapes) {
+  SplitAttrs* param = const_cast<SplitAttrs*>(attrs.as<SplitAttrs>());
+
+  size_t axis = param->axis < 0 ? param->axis + old_in_shapes[0].size() :
+                static_cast<size_t>(param->axis);
+  const IntImm* sections = param->indices_or_sections.as<IntImm>();
+  CHECK(sections);
+  int64_t num_sections = sections->value;
+
+  Layout ret;
+  bool is_new_layout_selected = false;
+  LOG(INFO) << "Split rel: " << new_in_layouts << ", " << old_in_layouts;
+  if (new_in_layouts.defined()) {
+    LOG(INFO) << "New split layouts defined:" << new_in_layouts;
+    // this function is called after some operators are alternated.
+    // If all the new input layouts are same, the new in layout gets selected.  For axis, the new
+    // axis in the new layout is identified. The param->axis is then modified on the fly to conform
+    // to the new input layout.
+    const auto& concate_dim = old_in_layouts[0][axis];
+    bool all_input_layouts_same = true;
+    for (auto new_layout : new_in_layouts) {
+      if (!new_layout.Equals(new_in_layouts[0])) {
+        all_input_layouts_same = false;
+      }
+    }
+    LOG(INFO) << "All split layouts same: " << all_input_layouts_same;
+    if (all_input_layouts_same) {
+      auto new_index = new_in_layouts[0].IndexOf(concate_dim);
+      ret = new_in_layouts[0];
+      param->axis = new_index;
+      is_new_layout_selected = true;
+    }
+  }
+
+  if (!is_new_layout_selected) {
+    LOG(INFO) << "Failed to select new split layout";
+    // this function is called on the original correct relay ir
+    for (size_t i = 0; i < old_in_layouts.size(); ++i) {
+      if (old_in_layouts[i].defined()) {
+        ret = old_in_layouts[i];
+        break;
+      }
+    }
+
+    if (ret.ndim() <= axis || !ret[axis].IsPrimal()) {
+      LOG(INFO) << "Using old split layout: " << Array<Array<Layout>>{{Layout::Undef()}, Array<Layout>(num_sections, Layout::Undef())};
+      return Array<Array<Layout>>{{Layout::Undef()}, Array<Layout>(num_sections, Layout::Undef())};
+    }
+  }
+  LOG(INFO) << "Using new split layout: "
+            << Array<Array<Layout>>{Array<Layout>(old_in_layouts.size(), ret),
+                                    Array<Layout>(num_sections, ret)};
+  return Array<Array<Layout>>{Array<Layout>(old_in_layouts.size(), ret),
+                              Array<Layout>(num_sections, ret)};
+}
+
+
 Expr MakeSplit(Expr data,
                NodeRef indices_or_sections,
                int axis) {
@@ -2152,6 +2219,7 @@ the entries indicate where along axis the array is split.
 .set_support_level(3)
 .add_type_rel("Split", SplitRel)
 .set_attr<FTVMCompute>("FTVMCompute", SplitCompute)
+.set_attr<FInferCorrectLayout>("FInferCorrectLayout", SplitLayout)
 .set_attr<TOpPattern>("TOpPattern", kInjective);
 
 

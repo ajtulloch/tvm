@@ -50,8 +50,8 @@ def lower(sch, inputs, func_name, source_func):
     try:
         f = _build.lower(sch, inputs, name=func_name)
         import logging
-        logging.info("lower function %s", func_name)
-        logging.info("%s", _build.lower(sch, inputs, simple_mode=True))
+        # logging.info("lower function %s", func_name)
+        # logging.info("%s", _build.lower(sch, inputs, simple_mode=True))
     except Exception:
         msg = traceback.format_exc()
         msg += "Error during compile function\n"

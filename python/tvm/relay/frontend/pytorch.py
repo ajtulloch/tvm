@@ -163,6 +163,25 @@ def _relu():
         return _op.nn.relu(data)
     return _impl
 
+def _leaky_relu():
+    def _impl(inputs, input_types):
+        data = inputs[0]
+        data_type = input_types[0]
+        if input_types[0] == "quint8":
+            assert False
+        return _op.nn.relu(data)
+        # TODO: return _op.nn.leaky_relu(data, _expr.const(0.2, dtype="float32"))
+    return _impl
+
+def _reflection_pad_1d():
+    def _impl(inputs, input_types):
+        data = inputs[0]
+        if input_types[0] == "quint8":
+            assert False
+        pads = _infer_shape(inputs[1])
+        return _op.nn.pad(data, pad_width=((0, 0), (0, 0), (pads[0], pads[1])), pad_mode='reflect')
+    return _impl
+
 def _adaptive_avg_2d():
     def _impl(inputs, input_types):
         data = inputs[0]
@@ -220,7 +239,6 @@ def _convolution():
         strides = inputs[3]
         padding = inputs[4]
         dilation = inputs[5]
-
         if isinstance(weight, _expr.Expr):
             inferred_shape = _infer_shape(weight)
             weight_shape = []
@@ -249,21 +267,36 @@ def _convolution():
         if isinstance(dilation, _expr.Expr):
             dilation = _infer_shape(dilation)
 
+        # print("data", data)
+        # print("weight", weight)
+        # print("bias", bias)
+        # print("strides", strides)
+        # print("padding", padding)
+        # print("dilation", dilation)
+        # print("weight_shape", weight_shape)
+        # print("kernel_size", kernel_size)
+        assert len(kernel_size) in (1, 2)
+        data_layout = "NCHW" if len(kernel_size) == 2 else "NCW"
+        kernel_layout = "OIHW" if len(kernel_size) == 2 else "OIW"
         if use_transpose:
-            conv_out = _op.nn.conv2d_transpose(data,
-                                               weight,
-                                               strides=strides,
-                                               padding=padding,
-                                               dilation=dilation,
-                                               groups=groups,
-                                               channels=channels,
-                                               kernel_size=kernel_size,
-                                               data_layout="NCHW",
-                                               kernel_layout="OIHW",
-                                               out_layout="",
-                                               out_dtype="")
+            conv_out = (_op.nn.conv2d_transpose
+                        if len(kernel_size) == 2
+                        else _op.nn.conv1d_transpose)(data,
+                                                      weight,
+                                                      strides=strides,
+                                                      padding=padding,
+                                                      dilation=dilation,
+                                                      groups=groups,
+                                                      channels=channels,
+                                                      kernel_size=kernel_size,
+                                                      data_layout=data_layout,
+                                                      kernel_layout=kernel_layout,
+                                                      out_layout="",
+                                                      out_dtype="")
         else:
-            conv_out = _op.nn.conv2d(data,
+            conv_out = (_op.nn.conv2d
+                        if len(kernel_size) == 2
+                        else _op.nn.conv1d)(data,
                                      weight,
                                      strides=strides,
                                      padding=padding,
@@ -271,8 +304,8 @@ def _convolution():
                                      groups=groups,
                                      channels=channels,
                                      kernel_size=kernel_size,
-                                     data_layout="NCHW",
-                                     kernel_layout="OIHW",
+                                     data_layout=data_layout,
+                                     kernel_layout=kernel_layout,
                                      out_layout="",
                                      out_dtype="")
 
@@ -835,6 +868,8 @@ _convert_map = {
     "aten::slice"                           : _slice(),
     "aten::select"                          : _select(),
     "aten::relu"                            : _relu(),
+    "aten::reflection_pad1d"          : _reflection_pad_1d(),
+    "aten::leaky_relu"                      : _leaky_relu(),
     "aten::relu_"                           : _relu(),
     "aten::adaptive_avg_pool2d"             : _adaptive_avg_2d(),
     "aten::adaptive_max_pool2d"             : _adaptive_max_2d(),
@@ -1349,6 +1384,8 @@ def from_pytorch(script_module, input_shapes, custom_convert_map=None):
 
     ret = convert_operators(_get_operator_nodes(graph.nodes()), outputs,
                             output_index_map, ret_name)
+    print(ret)
     func = tvm.relay.Function(_analysis.free_vars(ret[0]), ret[0])
-
+    print(func)
+    print(func.astext())
     return _module.IRModule.from_expr(func), tvm_params

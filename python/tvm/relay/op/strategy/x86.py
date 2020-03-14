@@ -212,7 +212,7 @@ def conv1d_strategy_cpu(attrs, inputs, out_type, target):
                                     wrap_topi_schedule(topi.x86.schedule_conv1d_ncw),
                                     name="conv1d_ncw.x86")
     elif layout == "NWC":
-        strategy.add_implementation(wrap_compute_conv1d(topi.nn.conv1d_nwc),
+        strategy.add_implementation(wrap_compute_conv1d(topi.x86.conv1d_nwc),
                                     wrap_topi_schedule(topi.x86.schedule_conv1d_nwc),
                                     name="conv1d_nwc.x86")
     else:
@@ -234,7 +234,6 @@ def conv1d_transpose_strategy(attrs, inputs, out_type, target):
                                     wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_ncw),
                                     name="conv1d_transpose_ncw.generic")
     elif layout == "NWC":
-        print(inputs[0], inputs[1])
         strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.x86.conv1d_transpose_nwc),
                                     wrap_topi_schedule(topi.x86.schedule_conv1d_transpose_nwc),
                                     name="conv1d_transpose_nwc.x86")

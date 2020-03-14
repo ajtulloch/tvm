@@ -2,11 +2,15 @@ import tvm
 from tvm import relay
 import numpy as np
 from tvm import autotvm
-
+# import tvm.contrib.graph_runtime as runtime
+from tvm.contrib.debugger import debug_runtime as graph_runtime
 import logging
 import sys
 logging.getLogger('autotvm').setLevel(logging.DEBUG)
 logging.getLogger('autotvm').addHandler(logging.StreamHandler(sys.stdout))
+
+def leaky_relu(x, alpha):
+    return relay.nn.relu(x)
 
 def relay_model(input_size, ngf, n_residual_layers):
     ratios = [8, 8, 2, 2]
@@ -40,7 +44,7 @@ def relay_model(input_size, ngf, n_residual_layers):
     # Upsample to raw audio scale
     for i, r in enumerate(ratios):
         (w, b) = conv1d_transpose_params("conv1_ratios_{i}".format(i=i), mult * ngf, mult * ngf // 2, r * 2)
-        x = relay.nn.leaky_relu(x, 0.2)
+        x = leaky_relu(x, 0.2)
         x = relay.nn.bias_add(relay.nn.conv1d_transpose(x, w, data_layout="NWC", kernel_layout="WOI", out_layout="NWC", strides=(r,), padding=(r // 2 + r % 2,), output_padding=(r % 2,)), b, axis=2)
 
         for j in range(n_residual_layers):
@@ -52,16 +56,16 @@ def relay_model(input_size, ngf, n_residual_layers):
                 (w_block_0, b_block_0) = conv1d_params("conv1d_resblock_{i}_{j}_0".format(i=i, j=j), dim, dim, 3)
                 (w_block_1, b_block_1) = conv1d_params("conv1d_resblock_{i}_{j}_1".format(i=i, j=j), dim, dim, 1)
 
-                y = relay.nn.leaky_relu(y, 0.2)
+                y = leaky_relu(y, 0.2)
                 y = relay.nn.pad(x, pad_mode='reflect', pad_width=((0, 0), (dilation, dilation), (0, 0)))
                 y = relay.nn.bias_add(relay.nn.conv1d(y, w_block_0, dilation=dilation, data_layout="NWC", kernel_layout="WIO", out_layout="NWC", ), b_block_0, axis=2)
-                y = relay.nn.leaky_relu(y, 0.2)
+                y = leaky_relu(y, 0.2)
                 y = relay.nn.bias_add(relay.nn.conv1d(y, w_block_1, data_layout="NWC", kernel_layout="WIO", out_layout="NWC"), b_block_1, axis=2)
                 return y + y_shortcut
             x = resnet_block(x, dim=mult * ngf // 2, dilation=3 ** j)
         mult //= 2
 
-    x = relay.nn.leaky_relu(x, 0.2)
+    x = leaky_relu(x, 0.2)
     x = relay.nn.pad(x, pad_mode='reflect', pad_width=((0, 0), (3, 3), (0, 0)))
 
     (w, b) = conv1d_params("conv_last", ngf, 1, 7)
@@ -77,9 +81,11 @@ tvm_x_nd = np.random.randn(*x_var.type_annotation.concrete_shape).astype(np.floa
 module = tvm.ir.module.IRModule.from_expr(func)
 print(module.astext(show_meta_data=False))
 
+log_file = "melgan.log"
+target = tvm.target.create("llvm -mcpu=core-avx2")
+
 
 def tune():
-    log_file = "melgan.log"
     tuning_option = {
         'log_filename': log_file,
         'tuner': 'random',
@@ -87,8 +93,8 @@ def tune():
 
         'measure_option': autotvm.measure_option(
             builder=autotvm.LocalBuilder(),
-            runner=autotvm.LocalRunner(number=10, repeat=1,
-                                       min_repeat_ms=1000),
+            runner=autotvm.LocalRunner(number=2, repeat=2,
+                                       min_repeat_ms=100),
         ),
     }
 
@@ -114,26 +120,52 @@ def tune():
             # do tuning
             print(task.config_space)
             n_trial=len(task.config_space)
-            tuner_obj.tune(n_trial=50,
+            tuner_obj.tune(n_trial=20,
                            early_stopping=early_stopping,
                            measure_option=measure_option,
                            callbacks=[
                                autotvm.callback.progress_bar(n_trial, prefix=prefix),
                                autotvm.callback.log_to_file(log_filename)])
 
-    target = tvm.target.create("llvm -mcpu=core-avx2")
 
     # Use graph tuner to achieve graph level optimal schedules
     tasks = autotvm.task.extract_from_program(module["main"], target=target,
                                               params=tvm_params,
-                                              ops=(relay.op.get("nn.conv1d_transpose"), ))
+                                              ops=(
+                                                  relay.op.get("nn.conv1d"),
+                                                  relay.op.get("nn.conv1d_transpose"),
+                                              ))
 
     # run tuning tasks
     tune_kernels(tasks, **tuning_option)
 
 
+# tune()
 
-tune()
+def test():
+
+    # compile kernels with graph-level best records
+    with autotvm.apply_history_best(log_file):
+        print("Compile...")
+        with relay.build_config(opt_level=3):
+            graph, lib, params = relay.build_module.build(
+                module, target=target, params=tvm_params)
+
+        # upload parameters to device
+        ctx = tvm.cpu()
+        mod = graph_runtime.create(graph, lib, ctx)
+        mod.set_input('x', tvm_x_nd)
+        mod.set_input(**params)
+        mod.run()
+        mod.run()
+        # evaluate
+        # print("Evaluate inference time cost...")
+        # ftimer = mod.module.time_evaluator("run", ctx, min_repeat_ms=100)
+        # prof_res = np.array(ftimer().results) * 1000  # convert to millisecond
+        # print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
+        #       (np.mean(prof_res), np.std(prof_res)))
+
+test()
 # opt_level = 3
 # target = tvm.target.create("llvm -mcpu=core-avx2")
 # with tvm.relay.build_config(opt_level=opt_level):

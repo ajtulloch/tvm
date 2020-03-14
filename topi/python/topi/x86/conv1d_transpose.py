@@ -11,12 +11,11 @@ from topi import tag
 
 @autotvm.register_topi_compute('conv1d_transpose_nwc.x86')
 def conv1d_transpose_nwc(cfg, data, kernel, stride, padding, out_dtype):
+    print("Invoking conv1d_transpose_nwc compute")
     # dilate and pad
     if isinstance(stride, (tuple, list)):
         stride = stride[0]
     batch, data_width, channels_in = get_const_tuple(data.shape)
-    # print("Conv1DTranspose, data.shape=", data.shape, ", kernel.shape=", kernel.shape, ", stride=", stride, ", padding=", padding)
-
     kernel_width, channels_in_, channels_out = get_const_tuple(kernel.shape)
     assert channels_in == channels_in_, (channels_in, channels_in_)
     channels_out = simplify(channels_out)
@@ -40,21 +39,22 @@ def conv1d_transpose_nwc(cfg, data, kernel, stride, padding, out_dtype):
 
 @autotvm.register_topi_schedule('conv1d_transpose_nwc.x86')
 def schedule_conv1d_transpose_nwc(cfg, outs):
+    print("Invoking conv1d_transpose_nwc schedule")
     outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
     s = te.create_schedule([x.op for x in outs])
 
     def _schedule(cfg, s, output, data, kernel):
-        if "data_pad" in data.op.name:
-            s[data.op].compute_inline()
+        # if "data_pad" in data.op.name:
+        #     print("Has padding")
+        #     s[data.op].compute_inline()
 
         if "data_dilate" in data.op.input_tensors[0].op.name:
             s[data.op.input_tensors[0].op].compute_inline()
 
         n, w, c = s[output].op.axis
         rw, rc = s[output].op.reduce_axis
-        cfg = autotvm.get_config()
         cfg.define_split("tile_c", c, num_outputs=2,
-                         filter=lambda x: x.size[-1] in (8, 16) or x.size[-1] == 1)
+                         filter=lambda x: x.size[-1] in (8, 16))
         cfg.define_split("tile_w", w, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
         cfg.define_split("tile_rc", rc, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
 
@@ -70,9 +70,20 @@ def schedule_conv1d_transpose_nwc(cfg, outs):
         cfg['ann_spatial'].apply(s, output, [wi])
         s[output].reorder(n, wo, co, rco, rw, rci, wi, ci)
         (nd, wd, cd) = s[data].op.axis
-        # s[data].unroll(wd)
-        # s[data].unroll(cd)
-        s[data].compute_at(s[output], wo)
+        if "data_pad" in data.op.name:
+            (nd, wd, cd) = s[data.op].op.axis
+            s[data.op].compute_at(s[output], co)
+            s[data.op].unroll(wd)
+            s[data.op].vectorize(cd)
+        if output.op != outs[0].op:
+            (n, w, c) = s[outs[0].op].op.axis
+            co, ci = cfg["tile_c"].apply(s, outs[0].op, c)
+            wo, wi = cfg["tile_w"].apply(s, outs[0].op, w)
+            s[outs[0].op].reorder(n, wo, co, wi, ci)
+            s[outs[0].op].vectorize(ci)
+            s[outs[0].op].unroll(wi)
+            s[output.op].compute_at(s[outs[0].op], co)
+        print("Scheduling conv1d_transpose_nwc_schedule properly")
 
     def _callback(op):
         if op.tag == 'conv1d_transpose_nwc':

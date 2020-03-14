@@ -72,7 +72,7 @@ def schedule_conv1d_transpose_nwc(cfg, outs):
         (nd, wd, cd) = s[data].op.axis
         # s[data].unroll(wd)
         # s[data].unroll(cd)
-        s[data].compute_at(s[output], co)
+        s[data].compute_at(s[output], wo)
 
     def _callback(op):
         if op.tag == 'conv1d_transpose_nwc':

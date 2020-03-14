@@ -9,7 +9,7 @@ logging.getLogger('autotvm').setLevel(logging.DEBUG)
 logging.getLogger('autotvm').addHandler(logging.StreamHandler(sys.stdout))
 
 def relay_model(input_size, ngf, n_residual_layers):
-    ratios = [2] #[8, 8, 2, 2]
+    ratios = [8, 8, 2, 2]
     mult = int(2 ** len(ratios))
 
     x_var = relay.var('x', shape=[1, 32, input_size])
@@ -71,7 +71,7 @@ def relay_model(input_size, ngf, n_residual_layers):
     func = relay.Function(relay.analysis.free_vars(outputs), outputs)
     return func, x_var, params
 
-func, x_var, params = relay_model(80, 32, 1)
+func, x_var, params = relay_model(80, 32, 3)
 tvm_params = {k: tvm.nd.array(np.random.randn(*v.type_annotation.concrete_shape).astype(np.float32)) for k, v in params.items()}
 tvm_x_nd = np.random.randn(*x_var.type_annotation.concrete_shape).astype(np.float32)
 module = tvm.ir.module.IRModule.from_expr(func)

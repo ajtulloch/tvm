@@ -79,3 +79,54 @@ def conv1d_transpose_ncw(data, kernel, stride, padding, out_dtype):
             axis=[dc, dw]), tag="conv1d_transpose_ncw")
 
     return output
+
+def conv1d_transpose_nwc(data, kernel, stride, padding, out_dtype):
+    """Transposed 1D convolution ncw forward operator.
+
+    Parameters
+    ----------
+    data : tvm.te.Tensor
+        3-D with shape [batch, in_width, in_channel]
+
+    kernel : tvm.te.Tensor
+        3-D with shape [filter_width, in_channel, num_filter]
+
+    stride : ints
+        The spatial stride along width
+
+    padding : int or str
+        Padding size, or ['VALID', 'SAME']
+
+    out_dtype : str
+        The output data type. This is used for mixed precision.
+
+    Returns
+    -------
+    output : tvm.te.Tensor
+        3-D with shape [batch, out_channel, out_width]
+    """
+
+    # dilate and pad
+    if isinstance(stride, (tuple, list)):
+        stride = stride[0]
+    batch, data_width, channels_in = data.shape
+    kernel_width, _, channels_out = kernel.shape
+    channels_out = simplify(channels_out)
+    data = dilate(data, [1, stride, 1], name='data_dilate')
+    pad_left, pad_right = get_pad_tuple1d(padding, (kernel_width,))
+    pad_left = kernel_width - 1 - pad_left
+    pad_right = kernel_width - 1 - pad_right
+    data = pad(data, [0, pad_left, 0], [0, pad_right, 0], name='data_pad')
+
+    _, data_width, _ = data.shape
+    out_w = simplify(data_width - kernel_width + 1)
+    dc = te.reduce_axis((0, channels_in), name='dc')
+    dw = te.reduce_axis((0, kernel_width), name='dw')
+    output = te.compute(
+        (batch, out_w, channels_out),
+        lambda b, w, c: te.sum(
+            data[b, w+dw, dc].astype(out_dtype) *
+            kernel[kernel_width - 1 - dw, dc, c].astype(out_dtype),
+            axis=[dc, dw]), tag="conv1d_transpose_nwc")
+
+    return output

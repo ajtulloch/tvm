@@ -219,6 +219,27 @@ def conv1d_strategy_cpu(attrs, inputs, out_type, target):
         raise ValueError("Unsupported conv1d layout {}".format(layout))
     return strategy
 
+@conv1d_transpose_strategy.register("cpu")
+def conv1d_transpose_strategy(attrs, inputs, out_type, target):
+    """conv1d_transpose generic strategy"""
+    strategy = _op.OpStrategy()
+    layout = attrs.data_layout
+    dilation = get_const_tuple(attrs.dilation)
+    groups = attrs.groups
+    # assert layout == "NCW", "conv1d_transpose ncw only supported"
+    assert dilation == (1,), "conv1d_transpose dilation is not supported"
+    assert groups == 1, "conv1d_transpose groups == 1 only supported"
+    if layout == "NCW":
+        strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.nn.conv1d_transpose_ncw),
+                                    wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_ncw),
+                                    name="conv1d_transpose_ncw.generic")
+    elif layout == "NWC":
+        print(inputs[0], inputs[1])
+        strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.x86.conv1d_transpose_nwc),
+                                    wrap_topi_schedule(topi.x86.schedule_conv1d_transpose_nwc),
+                                    name="conv1d_transpose_nwc.x86")
+    return strategy
+
 @dense_strategy.register("cpu")
 def dense_strategy_cpu(attrs, inputs, out_type, target):
     """dense x86 strategy"""

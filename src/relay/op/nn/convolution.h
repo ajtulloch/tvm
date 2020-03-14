@@ -97,7 +97,8 @@ bool Conv1DRel(const Array<Type>& types, int num_inputs, const Attrs& attrs,
           << "Conv1D: shape of weight is inconsistent with channels, "
           << " channels=" << param->channels << " wshape=" << wshape;
     }
-    CHECK(reporter->AssertEQ(dshape_ncw[1], wshape[1]));
+    CHECK(reporter->AssertEQ(dshape_ncw[1], wshape[1]))
+        << "Conv1D: shape of weight is inconsistent with wshape=" << wshape << dshape_ncw;
     channels = wshape[0];
     dilated_ksize = 1 + (wshape[2] - 1) * param->dilation[0];
   }

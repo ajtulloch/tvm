@@ -412,8 +412,7 @@ def conv1d_strategy(attrs, inputs, out_type, target):
         raise ValueError("Unsupported conv1d layout {}".format(layout))
     return strategy
 
-# conv1d_transpose
-def wrap_compute_conv1d_transpose(topi_compute):
+def wrap_compute_conv1d_transpose_ncw(topi_compute):
     """wrap conv1d_transpose topi compute"""
     def _compute_conv1d_tranpsoe(attrs, inputs, out_type):
         padding = get_const_tuple(attrs.padding)
@@ -426,6 +425,20 @@ def wrap_compute_conv1d_transpose(topi_compute):
         return [out]
     return _compute_conv1d_tranpsoe
 
+# conv1d_transpose
+def wrap_compute_conv1d_transpose_nwc(topi_compute):
+    """wrap conv1d_transpose topi compute"""
+    def _compute_conv1d_tranpsoe(attrs, inputs, out_type):
+        padding = get_const_tuple(attrs.padding)
+        strides = get_const_tuple(attrs.strides)
+        out_dtype = attrs.out_dtype
+        out_dtype = (inputs[0].dtype if out_dtype in ("same", "") else out_dtype)
+        out = topi_compute(inputs[0], inputs[1], strides, padding, out_dtype)
+        output_padding = get_const_tuple(attrs.output_padding)
+        out = topi.nn.pad(out, [0, 0, 0], [0, output_padding[0], 0])
+        return [out]
+    return _compute_conv1d_tranpsoe
+
 @override_native_generic_func("conv1d_transpose_strategy")
 def conv1d_transpose_strategy(attrs, inputs, out_type, target):
     """conv1d_transpose generic strategy"""
@@ -434,12 +447,17 @@ def conv1d_transpose_strategy(attrs, inputs, out_type, target):
     layout = attrs.data_layout
     dilation = get_const_tuple(attrs.dilation)
     groups = attrs.groups
-    assert layout == "NCW", "conv1d_transpose ncw only supported"
+    # assert layout == "NCW", "conv1d_transpose ncw only supported"
     assert dilation == (1,), "conv1d_transpose dilation is not supported"
     assert groups == 1, "conv1d_transpose groups == 1 only supported"
-    strategy.add_implementation(wrap_compute_conv1d_transpose(topi.nn.conv1d_transpose_ncw),
-                                wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_ncw),
-                                name="conv1d_transpose_ncw.generic")
+    if layout == "NCW":
+        strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.nn.conv1d_transpose_ncw),
+                                    wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_ncw),
+                                    name="conv1d_transpose_ncw.generic")
+    elif layout == "NWC":
+        strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.nn.conv1d_transpose_nwc),
+                                    wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_nwc),
+                                    name="conv1d_transpose_nwc.generic")
     return strategy
 
 # dense

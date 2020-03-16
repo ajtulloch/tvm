@@ -169,23 +169,43 @@ def schedule_conv1d_nwc(cfg, outs):
         rco, rci = cfg["tile_rc"].apply(s, output, rc)
         wo, wi = cfg["tile_w"].apply(s, output, w)
 
-        cfg.define_annotate('ann_reduce', [rci, rw], policy='try_unroll')
+        cfg.define_annotate('ann_reduce', [rci], policy='try_unroll')
         cfg.define_annotate('ann_spatial', [wi], policy='unroll')
         s[output].vectorize(ci)
-        cfg['ann_reduce'].apply(s, output, [rci, rw])
+        cfg['ann_reduce'].apply(s, output, [rci])
         cfg['ann_spatial'].apply(s, output, [wi])
-        s[output].reorder(n, wo, co, rco, rw, rci, wi, ci)
+        # s[output].reorder(n, wo, co, rco, rw, rci, wi, ci)
+        s[output].reorder(n, wo, co, rw, rco, rci, wi, ci)
+
+
         if "data_pad" in data.op.name:
-            (nd, wd, cd) = s[data.op].op.axis
-            s[data.op].compute_at(s[output], co)
-            s[data.op].vectorize(cd)
-            s[data.op].unroll(wd)
+            data_pad = data.op
+            cfg.define_knob("data_pad_compute_at", [1, 2, 3])
+            (nd, wd, cd) = s[data_pad].op.axis
+            cdo, cdi = cfg["tile_rc"].apply(s, data_pad, cd)
+            # s[data.op].reorder(nd, wd, cdo, cdi)
+
+            if cfg['data_pad_compute_at'].val == 0:
+                s[data_pad].compute_inline()
+            if cfg['data_pad_compute_at'].val == 1:
+                s[data_pad].compute_at(s[output], rw)
+                s[data_pad].vectorize(cdi)
+                # s[data_pad].unroll(wd)
+            if cfg['data_pad_compute_at'].val == 2:
+                s[data_pad].compute_at(s[output], rci)
+                s[data_pad].vectorize(cdi)
+                # s[data_pad].unroll(wd)
+            if cfg['data_pad_compute_at'].val == 3:
+                s[data_pad].compute_at(s[output], co)
+                s[data_pad].vectorize(cdi)
+                # s[data_pad].unroll(wd)
         if output.op != outs[0].op:
             (n, w, c) = s[outs[0].op].op.axis
             co, ci = cfg["tile_c"].apply(s, outs[0].op, c)
             wo, wi = cfg["tile_w"].apply(s, outs[0].op, w)
             s[outs[0].op].reorder(n, wo, co, wi, ci)
             s[outs[0].op].vectorize(ci)
+            s[outs[0].op].unroll(wi)
             s[output.op].compute_at(s[outs[0].op], co)
         print("Scheduling conv1d_nwc_schedule properly")
         # s[data].compute_at(s[output], wo)

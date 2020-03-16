@@ -9,9 +9,11 @@ from topi.util import get_const_int, get_const_tuple, simplify, traverse_inline
 from topi.nn.util import get_pad_tuple1d
 from topi import tag
 
+
 @autotvm.register_topi_compute('conv1d_transpose_nwc.x86')
 def conv1d_transpose_nwc(cfg, data, kernel, stride, padding, out_dtype):
-    print("Invoking conv1d_transpose_nwc compute")
+    print("Invoking conv1d_transpose_nwc compute - {data.shape}, {kernel.shape}, {stride}, {padding}".format(**locals()))
+
     # dilate and pad
     if isinstance(stride, (tuple, list)):
         stride = stride[0]
@@ -39,7 +41,6 @@ def conv1d_transpose_nwc(cfg, data, kernel, stride, padding, out_dtype):
 
 @autotvm.register_topi_schedule('conv1d_transpose_nwc.x86')
 def schedule_conv1d_transpose_nwc(cfg, outs):
-    print("Invoking conv1d_transpose_nwc schedule")
     outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
     s = te.create_schedule([x.op for x in outs])
 
@@ -55,26 +56,47 @@ def schedule_conv1d_transpose_nwc(cfg, outs):
         rw, rc = s[output].op.reduce_axis
         cfg.define_split("tile_c", c, num_outputs=2,
                          filter=lambda x: x.size[-1] in (8, 16))
-        cfg.define_split("tile_w", w, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
-        cfg.define_split("tile_rc", rc, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
+        cfg.define_split("tile_w", w, num_outputs=2, filter=lambda x: x.size[-1] in (4,))
+        cfg.define_split("tile_rc", rc, num_outputs=2, filter=lambda x: x.size[-1] in (2, 4, 8, 16))
 
         # schedule according to config
         co, ci = cfg["tile_c"].apply(s, output, c)
         rco, rci = cfg["tile_rc"].apply(s, output, rc)
         wo, wi = cfg["tile_w"].apply(s, output, w)
 
-        cfg.define_annotate('ann_reduce', [rci, rw], policy='try_unroll')
-        cfg.define_annotate('ann_spatial', [wi], policy='unroll')
+        cfg.define_annotate('ann_reduce', [rci], policy='try_unroll')
+        cfg.define_annotate('ann_spatial', [wi], policy='try_unroll')
         s[output].vectorize(ci)
-        cfg['ann_reduce'].apply(s, output, [rci, rw])
-        cfg['ann_spatial'].apply(s, output, [wi])
-        s[output].reorder(n, wo, co, rco, rw, rci, wi, ci)
+        # cfg['ann_reduce'].apply(s, output, [rci])
+        # cfg['ann_spatial'].apply(s, output, [wi])
+        # s[output].reorder(n, wo, co, rco, rw, rci, wi, ci)
+        s[output].reorder(n, wo, co, rw, rco, rci, wi, ci)
         (nd, wd, cd) = s[data].op.axis
+
         if "data_pad" in data.op.name:
-            (nd, wd, cd) = s[data.op].op.axis
-            s[data.op].compute_at(s[output], co)
-            s[data.op].unroll(wd)
-            s[data.op].vectorize(cd)
+            data_pad = data.op
+            cfg.define_knob("data_pad_compute_at", [1])
+            (nd, wd, cd) = s[data_pad].op.axis
+            cdo, cdi = cfg["tile_rc"].apply(s, data_pad, cd)
+            # s[data.op].reorder(nd, wd, cdo, cdi)
+
+            if cfg['data_pad_compute_at'].val == 0:
+                s[data_pad].compute_inline()
+            if cfg['data_pad_compute_at'].val == 1:
+                s[data_pad].compute_at(s[output], rw)
+                s[data_pad].vectorize(cdi)
+                # s[data_pad].unroll(wd)
+            if cfg['data_pad_compute_at'].val == 2:
+                s[data_pad].compute_at(s[output], rci)
+                s[data_pad].vectorize(cdi)
+                # s[data_pad].unroll(wd)
+            if cfg['data_pad_compute_at'].val == 3:
+                s[data_pad].compute_at(s[output], co)
+                s[data_pad].vectorize(cdi)
+                # s[data_pad].unroll(wd)
+
+        else:
+            assert False
         if output.op != outs[0].op:
             (n, w, c) = s[outs[0].op].op.axis
             co, ci = cfg["tile_c"].apply(s, outs[0].op, c)
@@ -83,7 +105,6 @@ def schedule_conv1d_transpose_nwc(cfg, outs):
             s[outs[0].op].vectorize(ci)
             s[outs[0].op].unroll(wi)
             s[output.op].compute_at(s[outs[0].op], co)
-        print("Scheduling conv1d_transpose_nwc_schedule properly")
 
     def _callback(op):
         if op.tag == 'conv1d_transpose_nwc':

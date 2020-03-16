@@ -14,6 +14,7 @@ def leaky_relu(x, alpha):
 
 def relay_model(input_size, ngf, n_residual_layers):
     ratios = [8, 8, 2, 2]
+    ratios = [8]
     mult = int(2 ** len(ratios))
 
     x_var = relay.var('x', shape=[1, 32, input_size])
@@ -75,7 +76,7 @@ def relay_model(input_size, ngf, n_residual_layers):
     func = relay.Function(relay.analysis.free_vars(outputs), outputs)
     return func, x_var, params
 
-func, x_var, params = relay_model(80, 32, 3)
+func, x_var, params = relay_model(80, 32, 1)
 tvm_params = {k: tvm.nd.array(np.random.randn(*v.type_annotation.concrete_shape).astype(np.float32)) for k, v in params.items()}
 tvm_x_nd = np.random.randn(*x_var.type_annotation.concrete_shape).astype(np.float32)
 module = tvm.ir.module.IRModule.from_expr(func)
@@ -92,8 +93,8 @@ def tune():
         'early_stopping': None,
 
         'measure_option': autotvm.measure_option(
-            builder=autotvm.LocalBuilder(),
-            runner=autotvm.LocalRunner(number=2, repeat=2,
+            builder=autotvm.LocalBuilder(n_parallel=1),
+            runner=autotvm.LocalRunner(number=1, repeat=5,
                                        min_repeat_ms=100),
         ),
     }
@@ -120,7 +121,7 @@ def tune():
             # do tuning
             print(task.config_space)
             n_trial=len(task.config_space)
-            tuner_obj.tune(n_trial=20,
+            tuner_obj.tune(n_trial=50,
                            early_stopping=early_stopping,
                            measure_option=measure_option,
                            callbacks=[
@@ -132,7 +133,7 @@ def tune():
     tasks = autotvm.task.extract_from_program(module["main"], target=target,
                                               params=tvm_params,
                                               ops=(
-                                                  relay.op.get("nn.conv1d"),
+                                                  # relay.op.get("nn.conv1d"),
                                                   relay.op.get("nn.conv1d_transpose"),
                                               ))
 
@@ -140,7 +141,7 @@ def tune():
     tune_kernels(tasks, **tuning_option)
 
 
-# tune()
+tune()
 
 def test():
 
@@ -165,7 +166,7 @@ def test():
         # print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
         #       (np.mean(prof_res), np.std(prof_res)))
 
-test()
+# test()
 # opt_level = 3
 # target = tvm.target.create("llvm -mcpu=core-avx2")
 # with tvm.relay.build_config(opt_level=opt_level):

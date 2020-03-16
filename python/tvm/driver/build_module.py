@@ -145,14 +145,12 @@ def lower(sch,
     lower_phase1 = [x[1] for x in add_lower_pass if x[0] == 1]
     lower_phase2 = [x[1] for x in add_lower_pass if x[0] == 2]
     lower_phase3 = [x[1] for x in add_lower_pass if x[0] > 2]
-
     # Phase 0
     if isinstance(sch, schedule.Schedule):
         stmt = form_body(sch)
 
     for f in lower_phase0:
         stmt = f(stmt)
-
     compact = ir_pass.VerifyCompactBuffer(stmt)
     binds, arg_list = get_binds(args, compact, binds)
 

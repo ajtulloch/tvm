@@ -60,7 +60,7 @@ def conv1d_transpose_ncw(data, kernel, stride, padding, out_dtype):
     pad_left = kernel_width - 1 - pad_left
     pad_right = kernel_width - 1 - pad_right
     data = pad(data, [0, 0, pad_left], [0, 0, pad_right], name='data_pad')
-
+    
     # transpose kernel, switch kernel layout to IOW
     kernel = te.compute((channels_out, channels_in, kernel_width), \
                         lambda o, i, w: kernel[i][o][kernel_width-1-w],\

@@ -219,6 +219,18 @@ def conv1d_strategy_cpu(attrs, inputs, out_type, target):
         raise ValueError("Unsupported conv1d layout {}".format(layout))
     return strategy
 
+def x86_wrap_compute_conv1d_transpose_nwc(topi_compute):
+    """wrap conv1d_transpose topi compute"""
+    def _compute_conv1d_tranpsoe(attrs, inputs, out_type):
+        padding = get_const_tuple(attrs.padding)
+        strides = get_const_tuple(attrs.strides)
+        out_dtype = attrs.out_dtype
+        out_dtype = (inputs[0].dtype if out_dtype in ("same", "") else out_dtype)
+        output_padding = get_const_tuple(attrs.output_padding)
+        out = topi_compute(inputs[0], inputs[1], strides, padding, out_dtype, output_padding)
+        return [out]
+    return _compute_conv1d_tranpsoe
+
 @conv1d_transpose_strategy.register("cpu")
 def conv1d_transpose_strategy(attrs, inputs, out_type, target):
     """conv1d_transpose generic strategy"""
@@ -234,7 +246,7 @@ def conv1d_transpose_strategy(attrs, inputs, out_type, target):
                                     wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_ncw),
                                     name="conv1d_transpose_ncw.generic")
     elif layout == "NWC":
-        strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.x86.conv1d_transpose_nwc),
+        strategy.add_implementation(x86_wrap_compute_conv1d_transpose_nwc(topi.x86.conv1d_transpose_nwc),
                                     wrap_topi_schedule(topi.x86.schedule_conv1d_transpose_nwc),
                                     name="conv1d_transpose_nwc.x86")
     return strategy

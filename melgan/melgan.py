@@ -14,7 +14,7 @@ def leaky_relu(x, alpha):
 
 def relay_model(input_size, ngf, n_residual_layers):
     ratios = [8, 8, 2, 2]
-    ratios = [8]
+    # ratios = [8]
     mult = int(2 ** len(ratios))
 
     x_var = relay.var('x', shape=[1, 32, input_size])
@@ -76,13 +76,13 @@ def relay_model(input_size, ngf, n_residual_layers):
     func = relay.Function(relay.analysis.free_vars(outputs), outputs)
     return func, x_var, params
 
-func, x_var, params = relay_model(80, 32, 1)
+func, x_var, params = relay_model(80, 32, 3)
 tvm_params = {k: tvm.nd.array(np.random.randn(*v.type_annotation.concrete_shape).astype(np.float32)) for k, v in params.items()}
 tvm_x_nd = np.random.randn(*x_var.type_annotation.concrete_shape).astype(np.float32)
 module = tvm.ir.module.IRModule.from_expr(func)
 print(module.astext(show_meta_data=False))
 
-log_file = "melgan.log"
+log_file = "melgan_fixed.log"
 target = tvm.target.create("llvm -mcpu=core-avx2")
 
 
@@ -121,7 +121,7 @@ def tune():
             # do tuning
             print(task.config_space)
             n_trial=len(task.config_space)
-            tuner_obj.tune(n_trial=50,
+            tuner_obj.tune(n_trial=2,
                            early_stopping=early_stopping,
                            measure_option=measure_option,
                            callbacks=[
@@ -159,16 +159,10 @@ def test():
         mod.set_input(**params)
         mod.run()
         mod.run()
-        # evaluate
-        # print("Evaluate inference time cost...")
-        # ftimer = mod.module.time_evaluator("run", ctx, min_repeat_ms=100)
-        # prof_res = np.array(ftimer().results) * 1000  # convert to millisecond
-        # print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
-        #       (np.mean(prof_res), np.std(prof_res)))
+        print("Evaluate inference time cost...")
+        ftimer = mod.module.time_evaluator("run", ctx, min_repeat_ms=100)
+        prof_res = np.array(ftimer().results) * 1000  # convert to millisecond
+        print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
+              (np.mean(prof_res), np.std(prof_res)))
 
 # test()
-# opt_level = 3
-# target = tvm.target.create("llvm -mcpu=core-avx2")
-# with tvm.relay.build_config(opt_level=opt_level):
-#     graph, lib, params = tvm.relay.build_module.build(
-#         module, target, params=tvm_params)

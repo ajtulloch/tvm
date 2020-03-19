@@ -205,7 +205,7 @@ def schedule_conv1d_nwc(cfg, outs):
             wo, wi = cfg["tile_w"].apply(s, outs[0].op, w)
             s[outs[0].op].reorder(n, wo, co, wi, ci)
             s[outs[0].op].vectorize(ci)
-            s[outs[0].op].unroll(wi)
+            # s[outs[0].op].unroll(wi)
             s[output.op].compute_at(s[outs[0].op], co)
         print("Scheduling conv1d_nwc_schedule properly")
         # s[data].compute_at(s[output], wo)

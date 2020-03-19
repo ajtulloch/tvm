@@ -167,7 +167,7 @@ def test():
         mod.run()
         mod.run()
         print("Evaluate inference time cost...")
-        ftimer = mod.module.time_evaluator("run", ctx, repeat=100, number=5)
+        ftimer = mod.module.time_evaluator("run", ctx, min_repeat_ms=500, number=5)
         prof_res = np.array(ftimer().results) * 1000  # convert to millisecond
         print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
               (np.mean(prof_res), np.std(prof_res)))

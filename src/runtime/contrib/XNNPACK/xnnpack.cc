@@ -9,8 +9,8 @@
 #include <unordered_map>
 
 #include <tuple>
-// function has to live in the std namespace
-// so that it is picked up by argument-dependent name lookup (ADL).
+#include <thread>
+
 
 namespace std {
 namespace {
@@ -50,6 +50,32 @@ struct hash<std::tuple<TT...>> {
 namespace tvm {
 namespace contrib {
 using namespace runtime;
+
+int MaxConcurrency() {
+  int max_concurrency = 1;
+  const char *val = getenv("TVM_NUM_THREADS");
+  if (val == nullptr) {
+    val = getenv("OMP_NUM_THREADS");
+  }
+  if (val != nullptr) {
+    max_concurrency = atoi(val);
+  } else {
+    max_concurrency = std::thread::hardware_concurrency();
+#if defined(_M_X64) || defined(__x86_64__)
+    max_concurrency /= 2;  // ignore hyper-threading
+#endif
+  }
+  return std::max(max_concurrency, 1);
+}
+
+pthreadpool_t GlobalThreadPool() {
+  static auto concurrency = MaxConcurrency();
+  if (concurrency == 1) { 
+    return nullptr;
+  }
+  static thread_local pthreadpool_t pool = pthreadpool_create(MaxConcurrency());
+  return pool;
+}
 
 using XNNOp = std::unique_ptr<xnn_operator, decltype(&xnn_delete_operator)>;
 
@@ -116,9 +142,9 @@ TVM_REGISTER_GLOBAL("tvm.contrib.xnnpack.conv1d")
       const auto& op = opcache.find(key)->second;
       CHECK_EQ(xnn_setup_convolution2d_nhwc_f32(
                    op.get(), batch_size, 1, data_width,
-                   (const float*)input->data, (float*)output->data, nullptr),
+                   (const float*)input->data, (float*)output->data, GlobalThreadPool()),
                xnn_status_success);
-      CHECK_EQ(xnn_run_operator(op.get(), nullptr), xnn_status_success);
+      CHECK_EQ(xnn_run_operator(op.get(), GlobalThreadPool()), xnn_status_success);
     });
 
 TVM_REGISTER_GLOBAL("tvm.contrib.xnnpack.conv1d_transpose")
@@ -182,9 +208,9 @@ TVM_REGISTER_GLOBAL("tvm.contrib.xnnpack.conv1d_transpose")
       CHECK_EQ(
           xnn_setup_deconvolution2d_nhwc_f32(
               op.get(), batch_size, 1, data_width, 0, output_adjustment_width,
-              (const float*)input->data, (float*)output->data, nullptr),
+              (const float*)input->data, (float*)output->data, GlobalThreadPool()),
           xnn_status_success);
-      CHECK_EQ(xnn_run_operator(op.get(), nullptr), xnn_status_success);
+      CHECK_EQ(xnn_run_operator(op.get(), GlobalThreadPool()), xnn_status_success);
     });
 
 }  // namespace contrib

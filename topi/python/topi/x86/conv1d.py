@@ -214,6 +214,8 @@ def schedule_conv1d_nwc(cfg, outs):
             s[outs[0].op].vectorize(ci)
             # s[outs[0].op].unroll(wi)
             s[output.op].compute_at(s[outs[0].op], co)
+            nw = s[outs[0].op].fuse(n, wo)
+            s[outs[0].op].parallel(nw)
         # s[data].compute_at(s[output], wo)
 
     def _callback(op):
@@ -228,7 +230,7 @@ def schedule_conv1d_nwc(cfg, outs):
 
 from topi.util import get_const_int, get_const_tuple, simplify, traverse_inline
 
-@autotvm.register_topi_compute('conv1d_transpose_nwc.x86_xnn')
+@autotvm.register_topi_compute('conv1d_nwc.x86_xnn')
 def conv1d_nwc_xnn(cfg, data,
                    kernel,
                    strides=1,
@@ -279,18 +281,20 @@ def conv1d_nwc_xnn(cfg, data,
                     lambda ins, outs: tvm.tir.call_packed(
                         "tvm.contrib.xnnpack.conv1d", 
                         ins[0], ins[1], outs[0], stride_width, pad_left, dilation_width),
-                    tag="conv1d_transpose_nwc",
-                    name="conv1d_transpose_xnnpack",
+                    tag="conv1d_nwc",
+                    name="conv1d_xnnpack",
                     dtype=out_dtype)        
 
 
-@autotvm.register_topi_schedule('conv1d_transpose_nwc.x86_xnn')
+@autotvm.register_topi_schedule('conv1d_nwc.x86_xnn')
 def schedule_conv1d_nwc_xnn(cfg, outs):
     outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
     s = te.create_schedule([x.op for x in outs])
     te.schedule.AutoInlineInjective(s)
-    if outs[0].op.tag != "conv1d_transpose_nwc":
-        last = list(s[outs[0].op].op.axis)[-1]
-        (lo, li) = s[outs[0].op].split(last, factor=16)
-        s[outs[0].op].vectorize(li)
+    if outs[0].op.tag != "conv1d_nwc":
+        (n, w, c) = s[outs[0].op].op.axis
+        (co, ci) = s[outs[0].op].split(c, factor=16)
+        s[outs[0].op].vectorize(ci)
+        nw = s[outs[0].op].fuse(n, w)
+        s[outs[0].op].parallel(nw)
     return s

@@ -43,7 +43,9 @@ def schedule_conv1d_transpose_nwc(cfg, outs):
     s = te.create_schedule([x.op for x in outs])
     te.schedule.AutoInlineInjective(s)
     if outs[0].op.tag != "conv1d_transpose_nwc":
-        last = list(s[outs[0].op].op.axis)[-1]
-        (lo, li) = s[outs[0].op].split(last, factor=16)
-        s[outs[0].op].vectorize(li)
+        (n, w, c) = s[outs[0].op].op.axis
+        (co, ci) = s[outs[0].op].split(c, factor=16)
+        s[outs[0].op].vectorize(ci)
+        nw = s[outs[0].op].fuse(n, w)
+        s[outs[0].op].parallel(nw)
     return s

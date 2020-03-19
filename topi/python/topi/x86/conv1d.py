@@ -114,7 +114,6 @@ def conv1d_nwc(cfg,
     out_dtype : str
         The output data type. If None then output is same type as input.
     """
-    print("Invoking conv1d_nwc compute")
     if out_dtype is None:
         out_dtype = data.dtype
     if isinstance(strides, (tuple, list)):
@@ -152,7 +151,6 @@ def conv1d_nwc(cfg,
 
 @autotvm.register_topi_schedule('conv1d_nwc.x86')
 def schedule_conv1d_nwc(cfg, outs):
-    print("Invoking conv1d_nwc schedule")
     outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
     s = te.create_schedule([x.op for x in outs])
 
@@ -160,9 +158,9 @@ def schedule_conv1d_nwc(cfg, outs):
         n, w, c = s[output].op.axis
         rw, rc = s[output].op.reduce_axis
         cfg.define_split("tile_c", c, num_outputs=2,
-                         filter=lambda x: x.size[-1] in (8, 16) or x.size[-1] == 1)
-        cfg.define_split("tile_w", w, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
-        cfg.define_split("tile_rc", rc, num_outputs=2, filter=lambda x: x.size[-1] <= 8)
+                         filter=lambda x: x.size[-1] in (4, 8, 16) if x.size[-1] % 4 == 0 else True)
+        cfg.define_split("tile_w", w, num_outputs=2, filter=lambda x: x.size[-1] <= 4)
+        cfg.define_split("tile_rc", rc, num_outputs=2, filter=lambda x: x.size[-1] <= 4)
 
         # schedule according to config
         co, ci = cfg["tile_c"].apply(s, output, c)
@@ -175,8 +173,17 @@ def schedule_conv1d_nwc(cfg, outs):
         cfg['ann_reduce'].apply(s, output, [rci])
         cfg['ann_spatial'].apply(s, output, [wi])
         # s[output].reorder(n, wo, co, rco, rw, rci, wi, ci)
-        s[output].reorder(n, wo, co, rw, rco, rci, wi, ci)
 
+        def to_axes(axes):
+            return [x if isinstance(x, (tvm.autotvm.task.space.VirtualAxis, tvm.autotvm.task.space.Axis)) else cfg.axis(x) for x in axes]
+        [na, woa, coa, rwa, rcoa, rcia, wia, cia] = to_axes([n, wo, co, rw, rco, rci, wi, ci])
+        
+        cfg.define_reorder('order', [na, woa, coa, rwa, rcoa, rcia, wia, cia], policy="candidate", 
+            candidate=[
+               [na, woa, coa, rwa, rcoa, rcia, wia, cia],
+               [na, woa, coa, rcoa, rwa, rcia, wia, cia]
+        ])
+        cfg['order'].apply(s, output, [n, wo, co, rw, rco, rci, wi, ci])
 
         if "data_pad" in data.op.name:
             data_pad = data.op
@@ -207,7 +214,6 @@ def schedule_conv1d_nwc(cfg, outs):
             s[outs[0].op].vectorize(ci)
             # s[outs[0].op].unroll(wi)
             s[output.op].compute_at(s[outs[0].op], co)
-        print("Scheduling conv1d_nwc_schedule properly")
         # s[data].compute_at(s[output], wo)
 
     def _callback(op):
@@ -218,4 +224,73 @@ def schedule_conv1d_nwc(cfg, outs):
             _schedule(cfg, s, output, data, kernel)
 
     traverse_inline(s, outs[0].op, _callback)
+    return s
+
+from topi.util import get_const_int, get_const_tuple, simplify, traverse_inline
+
+@autotvm.register_topi_compute('conv1d_transpose_nwc.x86_xnn')
+def conv1d_nwc_xnn(cfg, data,
+                   kernel,
+                   strides=1,
+                   padding='VALID',
+                   dilation=1,
+                   out_dtype=None):
+    """ 1D convolution forward operator for NWC layout.
+
+    Parameters
+    ----------
+    data : tvm.te.Tensor
+        3-D with shape [batch, in_width, in_channel]
+
+    kernel : tvm.te.Tensor
+        3-D with shape [filter_size, in_channel, num_filter]
+
+    strides : int or tuple
+        The spatial stride along width
+
+    padding : int, tuple, or str
+        Padding size can be an integer for equal padding,
+        a tuple of (left, right) or a string in ['VALID', 'SAME'].
+
+    dilation : int or tuple
+        Dilation rate if convolution should be dilated.
+
+    out_dtype : str
+        The output data type. If None then output is same type as input.
+    """
+    if out_dtype is None:
+        out_dtype = data.dtype
+    if isinstance(strides, (tuple, list)):
+        stride_width = strides[0]
+    if isinstance(dilation, (tuple, list)):
+        dilation_width = dilation[0]
+
+    batch, data_width, in_channels_ = get_const_tuple(data.shape)
+    out_channels, kernel_width, in_channels = get_const_tuple(kernel.shape)
+    assert in_channels_ == in_channels
+    # Compute the output shape
+    dilated_kernel_width = (kernel_width - 1) * dilation_width + 1
+    pad_left, pad_right = get_pad_tuple1d(padding, (dilated_kernel_width, ))
+    assert pad_left == pad_right
+    out_width = (data_width - dilated_kernel_width + pad_left + pad_right) // stride_width + 1
+    cfg.add_flop(2 * batch * out_width * out_channels * in_channels * kernel_width)
+    return te.extern((batch, out_width, out_channels),
+                    [data, kernel],
+                    lambda ins, outs: tvm.tir.call_packed(
+                        "tvm.contrib.xnnpack.conv1d", 
+                        ins[0], ins[1], outs[0], stride_width, pad_left, dilation_width),
+                    tag="conv1d_transpose_nwc",
+                    name="conv1d_transpose_xnnpack",
+                    dtype=out_dtype)        
+
+
+@autotvm.register_topi_schedule('conv1d_transpose_nwc.x86_xnn')
+def schedule_conv1d_nwc_xnn(cfg, outs):
+    outs = [outs] if isinstance(outs, te.tensor.Tensor) else outs
+    s = te.create_schedule([x.op for x in outs])
+    te.schedule.AutoInlineInjective(s)
+    if outs[0].op.tag != "conv1d_transpose_nwc":
+        last = list(s[outs[0].op].op.axis)[-1]
+        (lo, li) = s[outs[0].op].split(last, factor=16)
+        s[outs[0].op].vectorize(li)
     return s

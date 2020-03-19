@@ -203,6 +203,8 @@ def conv3d_strategy_cpu(attrs, inputs, out_type, target):
 def conv1d_strategy_cpu(attrs, inputs, out_type, target):
     """conv1d x86 strategy"""
     layout = attrs.data_layout
+    kernel_layout = attrs.kernel_layout
+
     dilation = get_const_tuple(attrs.dilation)
     if dilation[0] < 1:
         raise ValueError("dilation should be a positive value")
@@ -211,7 +213,11 @@ def conv1d_strategy_cpu(attrs, inputs, out_type, target):
         strategy.add_implementation(wrap_compute_conv1d(topi.nn.conv1d_ncw),
                                     wrap_topi_schedule(topi.x86.schedule_conv1d_ncw),
                                     name="conv1d_ncw.x86")
-    elif layout == "NWC":
+    elif layout == "NWC" and kernel_layout == "OWI":
+        strategy.add_implementation(wrap_compute_conv1d(topi.x86.conv1d_nwc_xnn),
+                                    wrap_topi_schedule(topi.x86.schedule_conv1d_nwc_xnn),
+                                    name="conv1d_nwc.x86_xnn")
+    elif layout == "NWC" and kernel_layout == "WIO":
         strategy.add_implementation(wrap_compute_conv1d(topi.x86.conv1d_nwc),
                                     wrap_topi_schedule(topi.x86.schedule_conv1d_nwc),
                                     name="conv1d_nwc.x86")

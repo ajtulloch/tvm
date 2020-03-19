@@ -28,12 +28,13 @@ from common import get_all_backend
 _conv1d_transpose_nwc_implement = {
     # "generic": (topi.nn.conv1d_transpose_nwc, topi.generic.schedule_conv1d_transpose_nwc),
     "cpu": (topi.x86.conv1d_transpose_nwc, topi.x86.schedule_conv1d_transpose_nwc),
+    "generic": (topi.x86.conv1d_transpose_nwc, topi.x86.schedule_conv1d_transpose_nwc),
 }
 
 def verify_conv1d_transpose_nwc(batch, in_channel, in_size, num_filter, kernel, stride, padding):
     in_width = in_size
     A = te.placeholder((batch, in_width, in_channel), name='A')
-    W = te.placeholder((kernel, in_channel, num_filter), name='W')
+    W = te.placeholder((num_filter, kernel, in_channel), name='W')
 
     a_shape = get_const_tuple(A.shape)
     w_shape = get_const_tuple(W.shape)
@@ -45,7 +46,7 @@ def verify_conv1d_transpose_nwc(batch, in_channel, in_size, num_filter, kernel, 
         a_np.fill(1)
         w_np = np.random.uniform(size=w_shape).astype(dtype)
         w_np.fill(1)
-        b_np = topi.testing.conv1d_transpose_ncw_python(a_np.transpose(0, 2, 1), w_np.transpose(1, 2, 0), stride, padding).transpose(0, 2, 1)
+        b_np = topi.testing.conv1d_transpose_ncw_python(a_np.transpose(0, 2, 1), w_np.transpose(2, 0, 1), stride, padding).transpose(0, 2, 1)
         c_np = np.maximum(b_np, 0)
         return a_np, w_np, b_np, c_np
 
@@ -74,9 +75,8 @@ def verify_conv1d_transpose_nwc(batch, in_channel, in_size, num_filter, kernel, 
         tvm.testing.assert_allclose(b.asnumpy(), b_np, rtol=1e-5)
         tvm.testing.assert_allclose(c.asnumpy(), c_np, rtol=1e-5)
 
-    for device in get_all_backend():
-        if device not in ("metal", "vulkan"):
-            check_device(device)
+    for device in ["llvm"]:
+        check_device(device)
 
 
 def test_conv1d_transpose_nwc():

@@ -453,7 +453,7 @@ bool Conv1DTransposeRel(const Array<Type>& types,
           << " channels=" << param->channels
           << " wshape=" << Array<IndexExpr>(wshape);
     }
-    CHECK(reporter->AssertEQ(indexdiv(dshape_ncw[1], param->groups), wshape[0]));
+    CHECK(reporter->AssertEQ(indexdiv(dshape_ncw[1], param->groups), wshape[0])) << ", dshape_nchw=" << dshape_ncw << ", wshape=" << wshape;
     channels = wshape[1];
     dilated_ksize_x = 1 + (wshape[2] - 1) * param->dilation[0];
   }

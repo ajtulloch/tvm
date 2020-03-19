@@ -59,6 +59,8 @@ tvm_option(USE_MIOPEN "Build with ROCM:MIOpen" OFF)
 tvm_option(USE_ROCBLAS "Build with ROCM:RoCBLAS" OFF)
 tvm_option(USE_SORT "Build with sort support" OFF)
 tvm_option(USE_NNPACK "Build with nnpack support" OFF)
+tvm_option(USE_XNNPACK "Build with XNNPACK support" OFF)
+
 tvm_option(USE_RANDOM "Build with random support" OFF)
 tvm_option(USE_MICRO_STANDALONE_RUNTIME "Build with micro.standalone_runtime support" OFF)
 tvm_option(USE_ANTLR "Build with ANTLR for Relay parsing" OFF)
@@ -254,6 +256,8 @@ include(cmake/modules/contrib/Random.cmake)
 include(cmake/modules/contrib/MicroStandaloneRuntime.cmake)
 include(cmake/modules/contrib/Sort.cmake)
 include(cmake/modules/contrib/NNPack.cmake)
+include(cmake/modules/contrib/XNNPACK.cmake)
+
 include(cmake/modules/contrib/HybridDump.cmake)
 include(cmake/modules/contrib/TFLite.cmake)
 

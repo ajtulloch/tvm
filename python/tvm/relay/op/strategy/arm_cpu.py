@@ -229,3 +229,61 @@ def schedule_bitserial_dense_arm_cpu(attrs, inputs, out_type, target):
         wrap_topi_schedule(topi.arm_cpu.schedule_bitserial_dense),
         name="bitserial_dense.arm_cpu")
     return strategy
+
+@conv1d_strategy.register("arm_cpu")
+def conv1d_strategy_cpu(attrs, inputs, out_type, target):
+    """conv1d x86 strategy"""
+    layout = attrs.data_layout
+    kernel_layout = attrs.kernel_layout
+
+    dilation = get_const_tuple(attrs.dilation)
+    if dilation[0] < 1:
+        raise ValueError("dilation should be a positive value")
+    strategy = _op.OpStrategy()
+    if layout == "NCW":
+        strategy.add_implementation(wrap_compute_conv1d(topi.nn.conv1d_ncw),
+                                    wrap_topi_schedule(topi.x86.schedule_conv1d_ncw),
+                                    name="conv1d_ncw.x86")
+    elif layout == "NWC" and kernel_layout == "OWI":
+        strategy.add_implementation(wrap_compute_conv1d(topi.x86.conv1d_nwc_xnn),
+                                    wrap_topi_schedule(topi.x86.schedule_conv1d_nwc_xnn),
+                                    name="conv1d_nwc.x86_xnn")
+    elif layout == "NWC" and kernel_layout == "WIO":
+        strategy.add_implementation(wrap_compute_conv1d(topi.x86.conv1d_nwc),
+                                    wrap_topi_schedule(topi.x86.schedule_conv1d_nwc),
+                                    name="conv1d_nwc.x86")
+    else:
+        raise ValueError("Unsupported conv1d layout {}".format(layout))
+    return strategy
+
+def x86_wrap_compute_conv1d_transpose_nwc(topi_compute):
+    """wrap conv1d_transpose topi compute"""
+    def _compute_conv1d_tranpsoe(attrs, inputs, out_type):
+        padding = get_const_tuple(attrs.padding)
+        strides = get_const_tuple(attrs.strides)
+        out_dtype = attrs.out_dtype
+        out_dtype = (inputs[0].dtype if out_dtype in ("same", "") else out_dtype)
+        output_padding = get_const_tuple(attrs.output_padding)
+        out = topi_compute(inputs[0], inputs[1], strides, padding, out_dtype, output_padding)
+        return [out]
+    return _compute_conv1d_tranpsoe
+
+@conv1d_transpose_strategy.register("arm_cpu")
+def conv1d_transpose_strategy(attrs, inputs, out_type, target):
+    """conv1d_transpose generic strategy"""
+    strategy = _op.OpStrategy()
+    layout = attrs.data_layout
+    dilation = get_const_tuple(attrs.dilation)
+    groups = attrs.groups
+    # assert layout == "NCW", "conv1d_transpose ncw only supported"
+    assert dilation == (1,), "conv1d_transpose dilation is not supported"
+    assert groups == 1, "conv1d_transpose groups == 1 only supported"
+    if layout == "NCW":
+        strategy.add_implementation(wrap_compute_conv1d_transpose_ncw(topi.nn.conv1d_transpose_ncw),
+                                    wrap_topi_schedule(topi.generic.schedule_conv1d_transpose_ncw),
+                                    name="conv1d_transpose_ncw.generic")
+    elif layout == "NWC":
+        strategy.add_implementation(x86_wrap_compute_conv1d_transpose_nwc(topi.x86.conv1d_transpose_nwc),
+                                    wrap_topi_schedule(topi.x86.schedule_conv1d_transpose_nwc),
+                                    name="conv1d_transpose_nwc.x86")
+    return strategy

@@ -2,7 +2,7 @@ import tvm
 from tvm import relay
 import numpy as np
 from tvm import autotvm
-# import tvm.contrib.graph_runtime as graph_runtime
+import tvm.contrib.graph_runtime as graph_runtime
 from tvm.contrib.debugger import debug_runtime as graph_runtime
 import logging
 import sys
@@ -20,7 +20,8 @@ def relay_model(input_size, ngf, n_residual_layers):
     x_var = relay.var('x', shape=[1, 32, input_size])
     x = x_var
     params = {}
-    KERNEL_LAYOUT = "WIO"
+    # KERNEL_LAYOUT = "WIO"
+    KERNEL_LAYOUT = "OWI"
 
     def conv1d_params(name, in_channel, out_channel, kernel_size):
         w, b = "{name}_w".format(name=name), "{name}_b".format(name=name)
@@ -88,8 +89,9 @@ tvm_x_nd = np.random.randn(*x_var.type_annotation.concrete_shape).astype(np.floa
 module = tvm.ir.module.IRModule.from_expr(func)
 print(module.astext(show_meta_data=False))
 
-log_file = "melgan_xnn_ct_long.log"
-target = tvm.target.create("llvm -mcpu=core-avx2")
+log_file = "melgan_xnn_ct_long_arm.log"
+target = tvm.target.arm_cpu('rasp3b')
+#tvm.target.create("llvm -mcpu=core-avx2")
 
 
 def tune():
@@ -100,8 +102,10 @@ def tune():
 
         'measure_option': autotvm.measure_option(
             builder=autotvm.LocalBuilder(),
-            runner=autotvm.LocalRunner(number=1, repeat=3,
-                                       min_repeat_ms=100),
+            # runner=autotvm.LocalRunner(number=1, repeat=3,
+            #                            min_repeat_ms=100),
+            runner=autotvm.RPCRunner('rpi-tune-4t', '0.0.0.0', 9195, number=1, repeat=3,
+                                     min_repeat_ms=100),
         ),
     }
 
@@ -172,4 +176,35 @@ def test():
         print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
               (np.mean(prof_res), np.std(prof_res)))
 
-test()
+# test()
+
+def test_remote():
+    with autotvm.apply_history_best(log_file):
+        print("Compile...")
+        with relay.build_config(opt_level=3):
+            graph, lib, params = relay.build_module.build(
+                module, target=target, params=tvm_params)
+
+    import random
+    fname = str(random.random()) + ".tar"
+    remote = autotvm.measure.request_remote('rpi-tune-4t', '0.0.0.0', 9195,
+                                            timeout=10000)
+    lib.export_library(fname)
+    remote.upload(fname)
+    rlib = remote.load_module(fname)
+
+    # upload parameters to device
+    ctx = remote.context(str(target), 0)
+    mod = graph_runtime.create(graph, rlib, ctx)
+    mod.set_input('x', tvm_x_nd)
+    mod.set_input(**params)
+    mod.run()
+
+    # evaluate
+    print("Evaluate inference time cost...")
+    ftimer = mod.module.time_evaluator("run", ctx, number=2, repeat=3)
+    prof_res = np.array(ftimer().results) * 1000  # convert to millisecond
+    print("Mean inference time (std dev): %.2f ms (%.2f ms)" %
+          (np.mean(prof_res), np.std(prof_res)))
+
+test_remote()

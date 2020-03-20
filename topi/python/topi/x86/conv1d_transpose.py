@@ -30,11 +30,11 @@ def conv1d_transpose_nwc(cfg, data, kernel, stride, padding, out_dtype, out_padd
     return te.extern((batch, out_width, channels_out),
                     [data, kernel],
                     lambda ins, outs: tvm.tir.call_packed(
-                        "tvm.contrib.xnnpack.conv1d_transpose", 
+                        "tvm.contrib.xnnpack.conv1d_transpose",
                         ins[0], ins[1], outs[0], stride, padding, out_padding),
                     tag="conv1d_transpose_nwc",
                     name="conv1d_transpose_xnnpack",
-                    dtype=out_dtype)        
+                    dtype=out_dtype)
 
 
 @autotvm.register_topi_schedule('conv1d_transpose_nwc.x86')

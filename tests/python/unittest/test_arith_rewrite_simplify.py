@@ -902,6 +902,15 @@ def test_cast_simplify():
             for i in [0, 1, 2, 3]:
                 ck.verify(tvm.tir.Cast(dtype1, tvm.tir.const(i, dtype2)), tvm.tir.const(i, dtype1))
 
+
+def test_more_simplify():
+    ck = RewriteChecker()
+    x = te.var("x")
+    start = tvm.tir.Broadcast(tvm.tir.const(1, "int64"), 64) + tvm.tir.Cast("int64x64", tvm.tir.Ramp(0, 1, 64))
+    simp = tvm.tir.Ramp(tvm.tir.const(1, "int64"), tvm.tir.const(1, "int64"), 64)
+    ck.verify(start, simp)
+
+
 if __name__ == "__main__":
     test_floordiv_index_simplify()
     test_floormod_index_simplify()
@@ -918,3 +927,4 @@ if __name__ == "__main__":
     test_logical_simplify()
     test_let_simplify()
     test_cast_simplify()
+    test_more_simplify()

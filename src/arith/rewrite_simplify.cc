@@ -127,12 +127,20 @@ PrimExpr RewriteSimplifier::Impl::VisitExpr_(const AddNode* op) {
   PVar<IntImm> c1, c2, c3;
   // Pattern var for lanes in broadcast and ramp
   PVar<int> lanes;
+  PVar<DataType> pt;
+
   // Vector rules
   if (op->dtype.lanes() != 1) {
     TVM_TRY_REWRITE(ramp(b1, s1, lanes) + ramp(b2, s2, lanes), ramp(b1 + b2, s1 + s2, lanes));
     TVM_TRY_REWRITE(ramp(b1, s1, lanes) + broadcast(x, lanes), ramp(b1 + x, s1, lanes));
     TVM_TRY_REWRITE(broadcast(x, lanes) + ramp(b1, s1, lanes), ramp(x + b1, s1, lanes));
     TVM_TRY_REWRITE(broadcast(x, lanes) + broadcast(y, lanes), broadcast(x + y, lanes));
+    // TVM_TRY_REWRITE(broadcast(x, lanes) + cast(pt, ramp(c1, c2, lanes)), ramp(x + cast(pt, c1), cast(pt, c2), lanes));
+    if ((broadcast(x, lanes) + cast(pt, ramp(y, z, lanes))).Match(ret)) {
+      PVar<DataType> scalar_pt;
+      scalar_pt.Match_(pt.Eval().element_of());
+      return (ramp(x + cast(scalar_pt, y), cast(scalar_pt, z), lanes)).Eval();
+    }
   }
 
   if (IsIndexType(op->dtype)) {
